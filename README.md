@@ -8,10 +8,18 @@ Enhanced Real-Time Multi-Camera SLAM for 3D Scene Reconstruction
 >
 >   (env-mslam) $ python3 -m pip install -U pip
 >
+>   (env-mslam) $ python3 -m pip install -U 'git+https://github.com/facebookresearch/fvcore.git' 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'
+>
 >   (env-mslam) $ python3 -m pip install -r requirements.pip
+>
+>   (env-mslam) $ git clone https://github.com/facebookresearch/detectron2 detectron2_repo
+>
+>   (env-mslam) $ python3 -m pip install -e detectron2_repo
+
+
 
 ## Package contents
-* [mslam/main.py](mslam/main.py): entrypoint to run MultiSLAM
+* [mslam/main.py](mslam/main.py): Entrypoint to run MultiSLAM
 * [mslam/agent_loc](mslam/agent_loc):
     - [agent_loc.py](mslam/agent_loc/agent_loc.py): Locates the agent in 3d space in the scene
 * [mslam/depth](mslam/depth):
