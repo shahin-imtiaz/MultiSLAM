@@ -1,80 +1,172 @@
-# https://docs.opencv.org/3.4/da/df5/tutorial_py_sift_intro.html
-
-import numpy as np
+import open3d as o3d
 import cv2
+import matplotlib.pyplot as plt
+import time
+import numpy as np
+import copy
 
-class PointCloud:
-    def __init__(self, kpNum=1000):
-        self.kpNum = kpNum
-        self.sift = cv2.xfeatures2d.SIFT_create(self.kpNum)
-        self.FLANN_INDEX_KDTREE = 1
-        self.index_params = dict(algorithm = self.FLANN_INDEX_KDTREE, trees = 5)
-        self.search_params = dict(checks=50)
-        self.flann = cv2.FlannBasedMatcher(self.index_params,self.search_params)
-        self.match_thresh = 5
+class PointCloud():
+    def __init__(self):
+        self.pcd = None
+        self.vis = o3d.visualization.Visualizer()
+        self.vis.create_window()
 
-    def getTrainDescriptors(self):
-        return self.flann.getTrainDescriptors()
+    # def init_geometry(self, img):
+    #     self.vis.add_geometry(pcd2)
+    
+    def update(self):
+        self.vis.update_geometry()
+        self.vis.poll_events()
+        self.vis.update_renderer()
 
-    def isApart(self, kp, kpList, thresh=50):
-        cur_pt = np.array(kp.pt)
-
-        for i in kpList:
-            i_pt = np.array(i.pt)
-            if np.linalg.norm(cur_pt - i_pt) < thresh:
-                return False
-        return True
-
-    def estimate(self, img, kpNum=30):
-        kp, des = self.sift.detectAndCompute(img,None)
-
-        # sort keypoints by response
-        kp, des = zip(*(sorted(zip(kp, des), key=lambda x: x[0].response, reverse=True)))
+    def estimate(self, img_colour, img_depth, crop_fact_h=0.8, crop_fact_w=0.7, downsample=1):
+        # crop
+        h, w = img_colour.shape[:2]
+        crop_h = int((h - (crop_fact_h*h)) / 2)
+        crop_w = int((w - (crop_fact_w*w)) / 2)
         
-        # space apart keypoints
-        kp_apart = []
-        des_apart = []
-        for i in range(len(kp)):
-            if self.isApart(kp[i], kp_apart):
-                kp_apart.append(kp[i])
-                des_apart.append(des[i])
+        # print(h, w)
 
-        if kpNum <= len(kp_apart):
-            kp = kp_apart[:kpNum]
-            des = des_apart[:kpNum]
+        img_colour = copy.deepcopy(img_colour[crop_h:h-crop_h, crop_w:w-crop_w, :])
+        img_od3_colour = o3d.geometry.Image(img_colour)
+        img_depth = copy.deepcopy(img_depth[crop_h:h-crop_h, crop_w:w-crop_w, :])
+        img_od3_depth = o3d.geometry.Image(img_depth)
+
+        # o3d.visualization.draw_geometries([img_od3_colour])
+        # o3d.visualization.draw_geometries([img_od3_depth])
+        
+        rgbd_img = o3d.geometry.RGBDImage.create_from_color_and_depth(img_od3_colour, img_od3_depth)
+
+        cur_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
+            rgbd_img,
+            o3d.camera.PinholeCameraIntrinsic(
+                o3d.camera.PinholeCameraIntrinsicParameters.PrimeSenseDefault))
+
+        cur_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+        cur_pcd = cur_pcd.uniform_down_sample(downsample)
+        print(cur_pcd)
+        
+        if self.pcd == None:
+            print('cool')
+            self.pcd = copy.deepcopy(cur_pcd)
+            self.vis.add_geometry(self.pcd)
         else:
-            kp = kp_apart
-            des = des_apart
+            self.pcd.points = cur_pcd.points
+            self.pcd.colors = cur_pcd.colors
+            self.pcd.normals = cur_pcd.normals
+            # self.pcd = copy.deepcopy(cur_pcd)
+            # self.vis.add_geometry(self.pcd)
+        
+        self.update()
+        
+    #     if self.pcd == None:
+    #         self.pcd = 
+    # # o3d.visualization.draw_geometries([pcd2])
+    # # pts = np.mgrid[1: 6: complex(100),
+    # #       2: 9: complex(100),
+    # #       3: 6: complex(100)].reshape(3, -1).T
+    # # pcd = open3d.geometry.PointCloud()
 
-        # matches = self.flann.radiusMatch(np.array(des), maxDistance=50)
-        matches = self.flann.knnMatch(np.array(des), k=1)
-        print([x[0].imgIdx for x in matches])
-        matches = [x for x in matches if x[0].distance < 200]
-        print(len(matches))
-        # if len(matches) > 0:
-        #     for i in range(len(matches)):
-        #         print(matches[i][0].distance)
-
-        self.flann.add([np.array(des)])
-        self.flann.train()
-        return (kp, matches)
-        # return cv2.drawKeypoints(img,kp,img,flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    # # pcd.points = open3d.utility.Vector3dVector(pts)
+    # pcd.points = pcd2.points
+    # vis.add_geometry(pcd2)
+    # # vis.update_geometry()
+    # # vis.poll_events()
+    # # vis.update_renderer()
+    # # time.sleep(20)
 
 
 if __name__ == "__main__":
-    pc = PointCloud()
-    img1 = cv2.imread("input1.jpg")
-    img2 = cv2.imread("input2.png")
+    img_colour = cv2.imread("pc_test1.jpg")
+    img_depth = cv2.imread("pc_test1_d.jpg")
 
-    imgL = cv2.imread("imgL.png")
-    imgR = cv2.imread("imgR.png")
-    # cv2.imwrite("out1.png", pc.estimate(img1.copy()))
-    # cv2.imwrite("out2.png", pc.estimate(img1.copy()))
-    # zkp1, zm1 = pc.estimate(img1.copy())
-    # zkp2, zm2 = pc.estimate(img1.copy())
-    # cv2.imwrite("out.png", cv2.drawMatchesKnn(img1,zkp1,img1,zkp2,zm2,None))
-    # pc.estimate(img1.copy())
-    # pc.estimate(img2.copy())
-    zkp1, zm1 = pc.estimate(imgL.copy())
-    zkp2, zm2 = pc.estimate(imgR.copy())
-    cv2.imwrite("out.png", cv2.drawMatchesKnn(imgR,zkp2,imgL,zkp1,zm2,None))
+    # img_colour = o3d.geometry.Image(img_colour)
+    # img_depth = o3d.geometry.Image(img_depth)
+
+    pc = PointCloud()
+    pc.estimate(img_colour, img_depth, downsample=50)
+    time.sleep(5)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # # (flag1, img_colour_encodedImage) = cv2.imencode(".jpg", img_colour)
+    # # (flag2, img_depth_encodedImage) = cv2.imencode(".jpg", img_depth)
+    # # print(flag1, flag2)
+    # # img_colour_encodedImage = (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
+    # #         bytearray(img_colour_encodedImage) + b'\r\n')
+    # # img_depth_encodedImage = (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
+    # #         bytearray(img_depth_encodedImage) + b'\r\n')
+    # # img_colour = o3d.io.read_image("pc_test1.jpg")
+    # # img_depth = o3d.io.read_image("pc_test1_d.jpg")
+    # # print(np.asarray(img_colour).shape)
+    # # exit(1)
+    # rgbd_img = o3d.geometry.RGBDImage.create_from_color_and_depth(
+    #     img_colour, img_depth)
+    # # exit(1)
+    # # plt.subplot(1, 2, 1)
+    # # plt.title('Redwood grayscale image')
+    # # plt.imshow(rgbd_img.color)
+    # # plt.subplot(1, 2, 2)
+    # # plt.title('Redwood depth image')
+    # # plt.imshow(rgbd_img.depth)
+
+    # pcd = o3d.geometry.PointCloud()
+    # vis = o3d.visualization.Visualizer()
+    # vis.create_window()
+    # # vis.add_geometry(pcd)
+    # # opt = vis.get_render_option()
+    # # opt.point_size = 1.0
+
+    # pcd1 = o3d.geometry.PointCloud()
+
+    # pcd2 = o3d.geometry.PointCloud.create_from_rgbd_image(
+    #     rgbd_img,
+    #     o3d.camera.PinholeCameraIntrinsic(
+    #         o3d.camera.PinholeCameraIntrinsicParameters.PrimeSenseDefault))
+
+    # pcd2.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+    # # o3d.visualization.draw_geometries([pcd2])
+    # # pts = np.mgrid[1: 6: complex(100),
+    # #       2: 9: complex(100),
+    # #       3: 6: complex(100)].reshape(3, -1).T
+    # # pcd = open3d.geometry.PointCloud()
+
+    # # pcd.points = open3d.utility.Vector3dVector(pts)
+    # pcd.points = pcd2.points
+    # vis.add_geometry(pcd2)
+    # # vis.update_geometry()
+    # # vis.poll_events()
+    # # vis.update_renderer()
+    # # time.sleep(20)
+    # while True:
+
+    # #     # pts = np.mgrid[1: np.random.randint(10): complex(100),
+    # #     #         2: np.random.randint(10): complex(100),
+    # #     #         3: np.random.randint(10): complex(100)].reshape(3, -1).T
+        
+    # #     # pcd.points = pcd1.points
+    # #     # # pcd.clear()
+    # #     # # pcd.points = open3d.utility.Vector3dVector(pts)
+    #     vis.update_geometry()
+    #     vis.poll_events()
+    #     vis.update_renderer()
+    #     # time.sleep(5)
+    # #     x = o3d.utility.Vector3dVector([[1, 2, 3]])
+    # #     pcd.points = pcd.translate(x)
+    # #     # pcd.clear()
+    # #     # pcd.points = open3d.utility.Vector3dVector(pts)
+    # #     vis.update_geometry()
+    # #     vis.poll_events()
+    # #     vis.update_renderer()
+    #     # time.sleep(0.05)
