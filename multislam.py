@@ -1,13 +1,12 @@
-# Based on the guide from https://www.pyimagesearch.com/2019/09/02/opencv-stream-video-to-web-browser-html-page/
+# Flask streaming webserver based on the guide from:
+# https://www.pyimagesearch.com/2019/09/02/opencv-stream-video-to-web-browser-html-page/
 
-from mslam.geo_proj.geo_proj import PointCloud
-# import the necessary packages
+from mslam.geo_proj.geo_proj import GeoProjection
 from mslam.obj_rec.objectdetect import ObjectDetect
 from mslam.depth.depth import MonoDepth
-# from mslam.depth.depth_hd3 import StereoDepth
+# from mslam.depth.depth_hd3 import StereoDepth TODO
+from mslam.agent_loc.agent_loc import AgentLocate
 
-# from mslam.geo_proj.geo_proj import PointCloud
-from imutils.video import VideoStream, FileVideoStream
 from flask import Response
 from flask import Flask
 from flask import render_template
@@ -18,165 +17,141 @@ import imutils
 import time
 import cv2
 
-outputObjDetFrame = None
-outputDepthFrame = None
-outputStereoDepthFrame = None
-outputSIFTFrame = None
+debugging = True
+isLiveFeed = False
 
-lock = threading.Lock()
+enableModules = {
+    'object_detection': True,
+    'stereo_depth': False,
+    'agent_locate': False,
+    'mono_depth': True,     # <----
+    'geo_projection': False, # -----^ dependency
+}
+
+outputFrame = {
+    'object_detection': None,
+    'mono_depth': None,
+    'stereo_depth': None,
+    'agent_locate': None,
+    'geo_projection': None
+}
+
 app = Flask(__name__)
-# vs = VideoStream(src=0).start()
-# vs = FileVideoStream("video/Back to school, University of Toronto St. George Campus walk-U_cLTtisR0s.mp4")
-# vs.start()
-# time.sleep(2.0)
-vs = cv2.VideoCapture("video/class2mp4.mp4")
 
+vs = None   # Left camera stream
+vs2 = None  # Right camera stream
 
 @app.route("/")
 def index():
 	return render_template("index.html")
 
-def mslam_obj_detect():
-    global vs, outputObjDetFrame, outputDepthFrame, outputStereoDepthFrame, outputSIFTFrame, lock
-    od = ObjectDetect("detectron2_repo/configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")
-    md = MonoDepth()
-    # sd = StereoDepth("hd3_repo/scripts/model_zoo/hd3s_things_kitti-1243813e.pth")
-    sd_prev_frames = []
-    # proc_sift = PointCloud()
-    pc3d = PointCloud()
+def mslam():
+    global vs, enableModules, outputFrame
+    
+    # Initialize modules
+    mod_object_detection = None
+    mod_mono_depth = None
+    mod_stereo_depth = None
+    mod_agent_locate = None
+    mod_geo_projection = None
+
+    if debugging:
+        print("Initializing modules")
+
+    if enableModules['object_detection']:
+        mod_object_detection = ObjectDetect("detectron2_repo/configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")
+    if enableModules['mono_depth']:
+        mod_mono_depth = MonoDepth()
+    if enableModules['stereo_depth']:
+        mod_stereo_depth = StereoDepth("hd3_repo/scripts/model_zoo/hd3s_things_kitti-1243813e.pth")
+    if enableModules['agent_locate']:
+        mod_agent_locate = AgentLocate()
+    if enableModules['geo_projection']:
+        mod_geo_projection = GeoProjection()
+
+    if debugging:
+        print("Done initializing modules")
+        print("Starting MultiSlam rendering")
 
     while True:
-        print('inside detect')
-        gotFrame, frame = vs.read()
-        if not gotFrame:
+        # Get next frame
+        isValid, frame = vs.read()
+        if not isValid: # No more frames
             break
-        print('inside detect2')
-        # frame = imutils.resize(frame, width=300)
-        # height, width = frame.shape[:2]
-        # print(frame.shape)
-        # frame = cv2.resize(frame, (int(0.2*width), int(0.2*height)))
-        # print(frame.shape)
-        print('inside detect3')
-        # outputSIFTFrame = proc_sift.estimate(frame.copy())
-        outMonoDepth = md.estimate(frame.copy())
-        pc3d.estimate(frame.copy(), outMonoDepth.copy(), downsample=1000)
-        # if len(sd_prev_frames) < 20:
-        #     sd_prev_frames.append(frame.copy())
-        #     continue
-        # else:
-        #     sd_prev_frames.append(frame.copy())
-        #     outStereoDepth = sd.estimate(sd_prev_frames.pop(0), frame)
-        outObjDet = od.detect(frame)
-        # out = frame
-        print('outputting frame')
-        # with lock:
-        # cv2.imwrite("coolcool.jpg", frame)
-        outputObjDetFrame = outObjDet.copy()
-        outputDepthFrame = outMonoDepth.copy()
-        # outputStereoDepthFrame = outStereoDepth.copy()
-        # time.sleep(2)
+        
+        # Get next frame for right camera
+        if enableModules['stereo_depth']:
+            isValid, frame2 = vs2.read()
+            if not isValid:
+                break
 
-def generateObjDet():
-    global outputObjDetFrame, lock
+        if enableModules['mono_depth']:
+            outputFrame['mono_depth'] = mod_mono_depth.estimate(frame.copy())
+        if enableModules['agent_locate']:
+            outputFrame['agent_locate'] = mod_agent_locate.estimate(frame.copy())
+        if enableModules['object_detection']:
+            outputFrame['object_detection'] = mod_object_detection.estimate(frame.copy())
+        if enableModules['geo_projection']:
+            mod_geo_projection.estimate(frame.copy(), outputFrame['mono_depth'].copy(), downsample=1000)
+
+def generateStreamFrame(moduleName):
+    global outputFrame
 
     while True:
-        with lock:
-            if outputObjDetFrame is None:
-                continue
- 
-            (flag, encodedImage) = cv2.imencode(".jpg", outputObjDetFrame)
- 
-            if not flag:
-                continue
+        if outputFrame[moduleName] is None:
+            continue
+
+        (flag, encodedImage) = cv2.imencode(".jpg", outputFrame[moduleName])
+
+        if not flag:
+            continue
  
         yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
             bytearray(encodedImage) + b'\r\n')
 
-def generateMonoDepth():
-    global outputDepthFrame, lock
-
-    while True:
-        with lock:
-            if outputDepthFrame is None:
-                continue
- 
-            (flag, encodedImage) = cv2.imencode(".jpg", outputDepthFrame)
- 
-            if not flag:
-                continue
- 
-        yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
-            bytearray(encodedImage) + b'\r\n')
-
-def generateStereoDepth():
-    global outputStereoDepthFrame, lock
-
-    while True:
-        with lock:
-            if outputStereoDepthFrame is None:
-                continue
- 
-            (flag, encodedImage) = cv2.imencode(".jpg", outputStereoDepthFrame)
- 
-            if not flag:
-                continue
- 
-        yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
-            bytearray(encodedImage) + b'\r\n')
-
-def generateSIFT():
-    global outputSIFTFrame, lock
-
-    while True:
-        with lock:
-            if outputSIFTFrame is None:
-                continue
- 
-            (flag, encodedImage) = cv2.imencode(".jpg", outputSIFTFrame)
- 
-            if not flag:
-                continue
- 
-        yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
-            bytearray(encodedImage) + b'\r\n')
-
-
-@app.route("/video_feed_obj_det")
-def video_feed_obj_det():
-	return Response(generateObjDet(),
+@app.route("/stream_object_detection")
+def stream_object_detection():
+	return Response(generateStreamFrame('object_detection'),
 		mimetype = "multipart/x-mixed-replace; boundary=frame")
 
-@app.route("/video_feed_mono_depth")
-def video_feed_mono_depth():
-	return Response(generateMonoDepth(),
+@app.route("/stream_mono_depth")
+def stream_mono_depth():
+	return Response(generateStreamFrame('mono_depth'),
 		mimetype = "multipart/x-mixed-replace; boundary=frame")
 
-@app.route("/video_feed_stereo_depth")
-def video_feed_stereo_depth():
-	return Response(generateStereoDepth(),
+@app.route("/stream_stereo_depth")
+def stream_stereo_depth():
+	return Response(generateStreamFrame('stereo_depth'),
 		mimetype = "multipart/x-mixed-replace; boundary=frame")
 
-@app.route("/video_feed_sift")
-def video_feed_sift():
-	return Response(generateSIFT(),
+@app.route("/stream_agent_locate")
+def stream_agent_locate():
+	return Response(generateStreamFrame('agent_locate'),
 		mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+# NOTE: No stream for geo_projection as it is rendered in the Open3D visualizer
 
 if __name__ == '__main__':
-	ap = argparse.ArgumentParser()
-	ap.add_argument("-i", "--ip", type=str, required=True,
-		help="ip address of the device")
-	ap.add_argument("-o", "--port", type=int, required=True,
-		help="ephemeral port number of the server (1024 to 65535)")
-	args = vars(ap.parse_args())
+    # Arg parsing
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-i", "--ip", type=str, required=True, help="ip address")
+    ap.add_argument("-o", "--port", type=int, required=True, help="port number")
+    ap.add_argument("-L", "--leftcam", type=str, required=True, help="left camera stream")
+    ap.add_argument("-R", "--rightcam", type=str, required=False, help="right camera stream")
+    args = vars(ap.parse_args())
  
-	# start a thread that will perform motion detection
-	t = threading.Thread(target=mslam_obj_detect)
-	t.daemon = True
-	t.start()
+    # Camera feed setup
+    vs = cv2.VideoCapture(args["leftcam"])
+    if args["rightcam"] is not None:
+        vs2 = cv2.VideoCapture(args["rightcam"])
+
+    if isLiveFeed:
+        time.sleep(2.0)
+
+    # Single threaded multislam
+    t = threading.Thread(target=mslam)
+    t.daemon = True
+    t.start()
  
-	# start the flask app
-	app.run(host=args["ip"], port=args["port"], debug=True,
-		threaded=True, use_reloader=False)
- 
-# release the video stream pointer
-vs.stop()
+    # Start flask webserver
+    app.run(host=args["ip"], port=args["port"], debug=True, threaded=True, use_reloader=False)
