@@ -2,6 +2,8 @@
 Enhanced Real-Time Multi-Camera SLAM for 3D Scene Reconstruction
 
 ## Dev environment setup
+>   $ sudo apt-get install python-dev python3-dev
+>
 >   $ python3 -m venv env-mslam
 >
 >   $ source env-mslam/bin/activate
