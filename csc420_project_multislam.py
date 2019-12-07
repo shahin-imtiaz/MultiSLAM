@@ -233,7 +233,7 @@ class AgentLocate:
         return None
 
     # Returns True iff a given keypoint is a euclidean distance of 20 away from ALL other saved keypoints
-    def isApart(self, kp, kpList, thresh=20):
+    def isApart(self, kp, kpList, thresh=15):
         cur_pt = np.array(kp.pt)
         for i in kpList:
             i_pt = np.array(i.pt)
@@ -329,19 +329,19 @@ y is negative in all
         '''
         if (np.sum(quads_y[0]) <= 0 and np.sum(quads_y[3]) >= 0 and
             np.sum(quads_x[:,0]) <= 0 and np.sum(quads_x[:,3]) >= 0):
-            print('moving forward')
+            # print('moving forward')
             return ('f')
         elif (np.sum(quads_x) <= 0):
-            print('rotate right')
+            # print('rotate right')
             return 'r'
         elif (np.sum(quads_x) >= 0):
-            print('rotate left')
+            # print('rotate left')
             return 'l'
         elif (np.sum(quads_y) <= 0):
-            print('rotate down')
+            # print('rotate down')
             return 'd'
         elif (np.sum(quads_y) >= 0):
-            print('rotate up')
+            # print('rotate up')
             return 'u'
 
         # if self.debugging:
@@ -358,7 +358,7 @@ y is negative in all
         # exit(1)
 
     # Compute the change in agent location based on previous frame
-    def estimate(self, img, kpNum=30):
+    def estimate(self, img, kpNum=50):
         kp, des = self.sift.detectAndCompute(img,None)
 
         # Sort keypoints by response
@@ -683,15 +683,15 @@ class GeoProjection():
     def movePoints(self, pcd, transformID):
         if transformID == 'f':
             # self.xyz -= np.array([0, 0, 0.00005])
-            self.xyz -= np.array([np.sin(self.rot[1][0])*self.fwd*-1, 0, np.cos(self.rot[1][0])*self.fwd])
+            self.xyz += np.array([np.sin(self.rot[1][0])*self.fwd, 0, np.cos(self.rot[1][0])*self.fwd])
         elif transformID == 'r':
-            self.rot += np.array([0,0.2,0]).reshape(3,1)
+            self.rot += np.array([0,0.12,0]).reshape(3,1)
         elif transformID == 'l':
-            self.rot += np.array([0,-0.2,0]).reshape(3,1)
+            self.rot += np.array([0,-0.12,0]).reshape(3,1)
         elif transformID == 'u':
-            self.rot += np.array([-0.2,0,0]).reshape(3,1)
+            self.rot += np.array([-0.12,0,0]).reshape(3,1)
         elif transformID == 'd':
-            self.rot += np.array([0.2,0,0]).reshape(3,1)
+            self.rot += np.array([0.12,0,0]).reshape(3,1)
 
         cur_pcd = pcd.translate(self.xyz)
         # cur_pcd = pcd.transform(self.rot)
@@ -702,7 +702,7 @@ class GeoProjection():
 
     # Add the point cloud from the current frame to the global point cloud of the map
     def estimate(self, img_colour, img_depth, transformID, crop_fact_h=0.8, crop_fact_w=0.7, downsample=20):
-        print(self.pcd)
+        # print(self.pcd)
         # Crop the frame to reduce boundary depth noise
         h, w = img_colour.shape[:2]
         crop_h = int((h - (crop_fact_h*h)) / 2)
@@ -886,14 +886,14 @@ outputFrame = {
 
 # Initial configuration for input and output rendering settings
 args = {
-    'leftcam': 'video/speed_walk_trim2.mp4', # Path to left camera video or mono video
+    'leftcam': 'video/model_train_track_trim.mp4', # Path to left camera video or mono video
     'rightcam': None,               # Path to right camera video if stereo is enabled
     'output': 'OUTPUT/',            # Path to rendering output
     'endframe': None              # Total number of video frames to process
 }
 
 # Verbose execution
-debugging = True
+debugging = False
 
 # Enable or disable the modules in use. For a complete slam system, enable all.
 enableModules = {
