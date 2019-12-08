@@ -1,6 +1,14 @@
+# '''
+# CSC420 Final Project - MultiSLAM
+# By: Mansoor Saqib & Shahin Imtiaz
+# '''
+
 ############################
 ####    Colab Config    ####
 ############################
+# '''
+# Please restart the environment after installing repos/packages
+# '''
 
 # -*- coding: utf-8 -*-
 #"""CSC420_Project_MultiSlam.ipynb
@@ -10,12 +18,14 @@
 #    https://colab.research.google.com/drive/1lAn0YT0-ymp0Gay0LU-vTBPgd4Ny1bOU
 #"""
 
-# Mount Google drive
+# # Mount Google drive
 #from google.colab import drive
 #drive.mount('/content/drive')
 
-# Create link in colab's home folder
+# # Create link in colab's home folder
 #!ln -s 'drive/My Drive/CSC420_Project_MultiSlam' CSC420_Project_MultiSlam
+
+# -----------------------NEW CELL--------------------------------------------------------
 
 # !git clone https://github.com/facebookresearch/detectron2 detectron2_repo
 # !git clone https://github.com/nianticlabs/monodepth2.git
@@ -87,7 +97,6 @@
 # oauthlib==3.1.0 \
 # open3d==0.8.0.0 \
 # opencv-contrib-python==3.4.2.17 \
-# opencv-python==3.4.2.17 \
 # pandocfilters==1.4.2 \
 # panopticapi==0.1 \
 # parso==0.5.1 \
@@ -139,10 +148,14 @@
 # youtube-dl==2019.11.28 \
 # zipp==0.6.0
 
+# -----------------------NEW CELL--------------------------------------------------------
+
 # !cd monodepth2 && python3 test_simple.py --image_path assets/test_image.jpg --model_name mono_1024x320
 
 # # don't have to run this: !cd detectron2_repo && python3 tools/train_net.py --config-file configs/Detectron1-Comparisons/mask_rcnn_R_50_FPN_noaug_1x.yaml --num-gpus 1
 # # don't have to run this: !cd detectron2_repo && cd datasets && ./prepare_for_tests.sh
+
+# -----------------------NEW CELL--------------------------------------------------------
 
 from __future__ import absolute_import, division, print_function
 import sys
@@ -202,9 +215,11 @@ from monodepth2_repo.utils import download_model_if_doesnt_exist
 #### MultiSlam Modules  ####
 ############################
 
-# Agent Location
-# Utilizes the OpenCV library: https://opencv.org/
-# Computes the movement of the agent based on frame by frame differences
+'''
+Agent Location
+Utilizes the OpenCV library: https://opencv.org/
+Computes the movement of the agent based on frame by frame differences
+'''
 class AgentLocate:
     # Initialize SIFT and Flann Matcher
     def __init__(self, kpNum=1000, enableGlobal=False, match_threshold=200, debugging=False):
@@ -243,48 +258,14 @@ class AgentLocate:
 
     # Return the camera translation and rotation matrix for the movement between frames
     def getViewTransform(self, matches, kp, imgShape):
-
-        # estimation
-        '''
-forward direction
-y is negative from top
-x is positive from right
-y is positive from bottom
-x is negative from left
-
-rotate right
-x is negative from all directions
-
-rotate left
-x is positive from all directions
-        '''
-
-        # print('matches', matches)
-        # print('cur', kp)
-        # print('prev', self.prevFrameKP)
-        # print(matches)
-
-        # print(kp[matches[0][0].queryIdx].pt, self.prevFrameKP[matches[0][0].trainIdx].pt)
-        # print(matches[0][0].distance)
-
-        # Divide the image into 4x4 quadrants
+        # Divide the image into 4x4 quadrants for each axis
         quad_width = imgShape[1] / 4
         quad_height = imgShape[0] / 4
-
-        # quads =[[[],[],[],[]],
-        #         [[],[],[],[]],
-        #         [[],[],[],[]],
-        #         [[],[],[],[]]]
-        
-        # pt_diff = [[[],[],[],[]],
-        #           [[],[],[],[]],
-        #           [[],[],[],[]],
-        #           [[],[],[],[]]]
-
         quads_x = np.zeros((4,4))
         quads_y = np.zeros((4,4))
 
-        # Place current frame's keypoint ids in the quadrants
+        # Reduce the difference in each axis for matching points to a numerical sign and sum over differences in each quadrant
+        # Place it in the quadrant belonging to the x, y location of the keypoint in the current frame.
         for i in range(len(matches)):
             x, y = kp[matches[i][0].queryIdx].pt
             xh, yh = self.prevFrameKP[matches[i][0].trainIdx].pt
@@ -300,62 +281,61 @@ x is positive from all directions
                 quads_y[qy, qx] -= 1
             else:
                 quads_y[qy, qx] += 1
-            # quads[quad_y][quad_x].append((np.round(x-xh, 2), np.round(y-yh, 2)))
 
+        # Calculate the overall numerical sign of each quadrant
         quads_x = np.where(quads_x < 0, -1, quads_x)
         quads_x = np.where(quads_x > 0, 1, quads_x)
         quads_y = np.where(quads_y < 0, -1, quads_y)
         quads_y = np.where(quads_y > 0, 1, quads_y)
 
-
-        '''
-forward direction
-y is negative from top
-x is positive from right
-y is positive from bottom
-x is negative from left
-
-rotate right
-x is negative from all directions
-
-rotate left
-x is positive from all directions
-
-rotate up
-y is positive in all
-
-rotate down
-y is negative in all
-        '''
-        if (np.sum(quads_y[0]) <= 0 and np.sum(quads_y[3]) >= 0 and
+        # Transformation logic:
+        # Move in the forward direction iff all conditions are met:
+        #   - Majority of Y quadrants in the top most row are 0 or negative
+        #   - Majority of X quadrants in the right most column are 0 or positive
+        #   - Majority of Y quadrants in the bottom most row are 0 or positive
+        #   - Majority of X quadrants in the left most column are 0 or negative
+        # 
+        # Rotate the camera right iff:
+        #   - Majority of X quadrants are 0 or negative
+        #
+        # Rotate the camera left iff:
+        #   - Majority of X quadrants are 0 or positive
+        #
+        # Rotate the camera up iff:
+        #   - Majority of Y quadrants are 0 or positive
+        #
+        # Rotate the camera down iff:
+        #   - Majority of Y quadrants are 0 or negative
+        
+        if (np.sum(quads_y[0]) == 0 and np.sum(quads_y[3]) == 0 and
+            np.sum(quads_x[:,0]) == 0 and np.sum(quads_x[:,3]) == 0):
+            if self.debugging:
+                print('Staying')
+            return ('s')
+        elif (np.sum(quads_y[0]) <= 0 and np.sum(quads_y[3]) >= 0 and
             np.sum(quads_x[:,0]) <= 0 and np.sum(quads_x[:,3]) >= 0):
-            # print('moving forward')
+            if self.debugging:
+                print('Moving Forward')
             return ('f')
         elif (np.sum(quads_x) <= 0):
-            # print('rotate right')
+            if self.debugging:
+                print('Rotate Right')
             return 'r'
         elif (np.sum(quads_x) >= 0):
-            # print('rotate left')
+            if self.debugging:
+                print('Rotate Left')
             return 'l'
         elif (np.sum(quads_y) <= 0):
-            # print('rotate down')
+            if self.debugging:
+                print('Rotate Down')
             return 'd'
         elif (np.sum(quads_y) >= 0):
-            # print('rotate up')
+            if self.debugging:
+                print('Rotate Up')
             return 'u'
 
-        # if self.debugging:
-        #     for row in quads:
-        #         # print(row)
-        #         for col in row:
-        #             for m in col:
-        #                 x, y = kp[pt].pt
-        #                 xh, yh = 
-        #                 pt_diff[row][col].append()
-
-
+        # No movement
         return None
-        # exit(1)
 
     # Compute the change in agent location based on previous frame
     def estimate(self, img, kpNum=50):
@@ -408,15 +388,16 @@ y is negative in all
 
         transform = self.getViewTransform(matchesFrameByFrame, kp, img.shape)
         self.prevFrameKP = kp
-        
         outKPFrame = cv2.drawKeypoints(img,kp,img,flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
         
         return outKPFrame, transform
 
-
-# Monocular Depth
-# Utilizes the Monodepth2 CNN: https://github.com/nianticlabs/monodepth2
-# Creates a depth map from a single frame
+'''
+Monocular Depth
+Utilizes the Monodepth2 CNN: https://github.com/nianticlabs/monodepth2
+Creates a depth map from a single frame
+NOTE: Makes use of the variable naming and calling conventions found in the library's predictor script
+'''
 class MonoDepth:
     # Initialize the predictor
     def __init__(self, path):
@@ -425,17 +406,14 @@ class MonoDepth:
         else:
             self.device = torch.device("cpu")
         
+        # Load model
         self.model_path = path
-        # print("-> Loading model from ", self.model_path)
         self.encoder_path = os.path.join(self.model_path, "encoder.pth")
         self.depth_decoder_path = os.path.join(self.model_path, "depth.pth")
-        
-        # LOADING PRETRAINED MODEL
-        # print("   Loading pretrained encoder")
         self.encoder = networks.ResnetEncoder(18, False)
         self.loaded_dict_enc = torch.load(self.encoder_path, map_location=self.device)
 
-        # extract the height and width of image that this model was trained with
+        # Model training paramaters
         self.feed_height = self.loaded_dict_enc['height']
         self.feed_width = self.loaded_dict_enc['width']
         self.filtered_dict_enc = {k: v for k, v in self.loaded_dict_enc.items() if k in self.encoder.state_dict()}
@@ -443,60 +421,46 @@ class MonoDepth:
         self.encoder.to(self.device)
         self.encoder.eval()
 
-        # print("   Loading pretrained decoder")
         self.depth_decoder = networks.DepthDecoder(
             num_ch_enc=self.encoder.num_ch_enc, scales=range(4))
 
         self.loaded_dict = torch.load(self.depth_decoder_path, map_location=self.device)
         self.depth_decoder.load_state_dict(self.loaded_dict)
-
         self.depth_decoder.to(self.device)
         self.depth_decoder.eval()
 
     def estimate(self, img):
         with torch.no_grad():
-            # for idx, image_path in enumerate(paths):
-
-            #     if image_path.endswith("_disp.jpg"):
-            #         # don't try to predict disparity for a disparity image!
-            #         continue
-
-            #     # Load image and preprocess
-            #     img = pil.open(image_path).convert('RGB')
+            # Convert cv2 image array to PIL Image
             img = Image.fromarray(img).convert('RGB')
             original_width, original_height = img.size
             img = img.resize((self.feed_width, self.feed_height), pil.LANCZOS)
             img = transforms.ToTensor()(img).unsqueeze(0)
 
-            # PREDICTION
+            # Get prediction
             img = img.to(self.device)
             features = self.encoder(img)
             outputs = self.depth_decoder(features)
-
             disp = outputs[("disp", 0)]
             disp_resized = torch.nn.functional.interpolate(
                 disp, (original_height, original_width), mode="bilinear", align_corners=False)
 
-            # # Saving numpy file
-            # output_name = os.path.splitext(os.path.basename(image_path))[0]
-            # name_dest_npy = os.path.join(output_directory, "{}_disp.npy".format(output_name))
-            # scaled_disp, _ = disp_to_depth(disp, 0.1, 100)
-            # np.save(name_dest_npy, scaled_disp.cpu().numpy())
-
-            # Saving colormapped depth imaged
+            # Generate depth map
             disp_resized_np = disp_resized.squeeze().cpu().numpy()
             vmax = np.percentile(disp_resized_np, 95)
             normalizer = mpl.colors.Normalize(vmin=disp_resized_np.min(), vmax=vmax)
             mapper = cm.ScalarMappable(norm=normalizer, cmap='magma')
             colormapped_im = (mapper.to_rgba(disp_resized_np)[:, :, :3] * 255).astype(np.uint8)
-            
+
             return colormapped_im
 
-
-# Stereo Depth
-# Utilizes the HD3 CNN: https://github.com/ucbdrive/hd3
-# Creates a depth map from two stereoscopic frames
-# NOTE: Currently a work in progress
+'''
+Stereo Depth
+Utilizes the HD3 CNN: https://github.com/ucbdrive/hd3
+Creates a depth map from two stereoscopic frames
+NOTE: Currently a work in progress
+NOTE: Makes use of the variable naming and calling conventions found in the library's predictor script
+'''
 class StereoDepth:
     def __init__(self, model_path):
         self.corr_range = [4, 4, 4, 4, 4, 4]
@@ -635,9 +599,11 @@ class StereoDepth:
                     #             np.uint16(-curr_vect[:, :, 0] * 256.0))
 
 
-# Geometric Projection
-# Utilizes the Open3D 3D Processing Library: https://github.com/intel-isl/Open3D
-# Creates a point cloud map of the region the agent is located in
+'''
+Geometric Projection
+Utilizes the Open3D 3D Processing Library: https://github.com/intel-isl/Open3D
+Creates a point cloud map of the region the agent is located in
+'''
 class GeoProjection():
     # Initialize an empty point cloud.
     def __init__(self, mode='offline'):
@@ -660,49 +626,50 @@ class GeoProjection():
         self.vis.update_renderer()
         # time.sleep(5)
 
+    # DEPRECATED
     # Returns the rotation matrix for a rotation in the Y axis
     def rotateY(self, d):
-        # return np.array([[np.cos(-d), 0, np.sin(-d), 0],
-        #                 [0, 1, 0, 0], 
-        #                 [-np.sin(-d), 0, np.cos(-d), 0], 
-        #                 [0, 0, 0, 1]])
         return np.array([[np.cos(d), 0, np.sin(d)],
                          [0, 1, 0], 
                          [-np.sin(d), 0, np.cos(d)]])
 
+    # DEPRECATED
+    # Returns the rotation matrix for a rotation in the X axis
     def rotateX(self, d):
-        # return np.array([[1, 0, 0, 0],
-        #                 [0, np.cos(-d), -np.sin(-d), 0], 
-        #                 [0, np.sin(-d), np.cos(-d), 0], 
-        #                 [0, 0, 0, 1]])
         return np.array([[1, 0, 0],
                          [0, np.cos(d), -np.sin(d)], 
                          [0, np.sin(d), np.cos(d)]])
 
     # Move a single frame's point cloud to match it's location in the global map
     def movePoints(self, pcd, transformID):
+        # Forward
         if transformID == 'f':
-            # self.xyz -= np.array([0, 0, 0.00005])
+            # Forward movement is mapped to the X-Z plane based on the vector angle of the current rotation
+            #   ^                       |
+            #   |                       |   
+            #   |       <------         |           ------->
+            #   | 0d            90d     v 180d               270d
             self.xyz += np.array([np.sin(self.rot[1][0])*self.fwd, 0, np.cos(self.rot[1][0])*self.fwd])
+        # Rotate right (Y axis)
         elif transformID == 'r':
             self.rot += np.array([0,0.12,0]).reshape(3,1)
+        # Rotate left (Y axis)
         elif transformID == 'l':
             self.rot += np.array([0,-0.12,0]).reshape(3,1)
+        # Rotate up (X axis)
         elif transformID == 'u':
             self.rot += np.array([-0.12,0,0]).reshape(3,1)
+        # Rotate down (X axis)
         elif transformID == 'd':
             self.rot += np.array([0.12,0,0]).reshape(3,1)
 
+        # Apply transformation
         cur_pcd = pcd.translate(self.xyz)
-        # cur_pcd = pcd.transform(self.rot)
-        # print(self.rot)
-        # cur_pcd = pcd.rotate(self.rotateY(self.rot[1]))
         cur_pcd = pcd.rotate(self.rot)
         return cur_pcd
 
     # Add the point cloud from the current frame to the global point cloud of the map
     def estimate(self, img_colour, img_depth, transformID, crop_fact_h=0.8, crop_fact_w=0.7, downsample=20):
-        # print(self.pcd)
         # Crop the frame to reduce boundary depth noise
         h, w = img_colour.shape[:2]
         crop_h = int((h - (crop_fact_h*h)) / 2)
@@ -725,7 +692,13 @@ class GeoProjection():
         # Downsample the number of points to reduce output size and rendering computation
         cur_pcd = cur_pcd.uniform_down_sample(downsample)
         
-        # Cut a square in the point cloud
+        # Cut a square in the point cloud to make a path viewable when the point cloud is rendered
+        #   _______________
+        #   |   X X X X   |
+        #   |   X X X X   |
+        #   |   X X X X   |
+        #   |             |  
+        #   --------------- where X represensts the cut region
         pcd_array = np.asarray(cur_pcd.points)
         pcd_cent = cur_pcd.get_center()
         pcd_max = cur_pcd.get_max_bound()
@@ -744,27 +717,23 @@ class GeoProjection():
         # Add the point cloud to the global map
         if self.pcd == None:
             self.pcd = copy.deepcopy(cur_pcd)
-            
             if self.mode == 'online':
                 self.vis.add_geometry(self.pcd)
         else:
             self.pcd += cur_pcd
-            # self.pcd.points = cur_pcd.points
-            # self.pcd.colors = cur_pcd.colors
-            # self.pcd.normals = cur_pcd.normals
-            # self.pcd = copy.deepcopy(cur_pcd)
-            # self.vis.add_geometry(self.pcd)
-        
+
         # Render the current global map
         if self.mode == 'online':
             self.update()
         
         return self.pcd
 
-
-# Object Detection
-# Utilizes Facebook AI Research's Detectron2 CNN: https://github.com/facebookresearch/detectron2
-# Performs frame by frame object detection and segmentation
+'''
+Object Detection
+Utilizes Facebook AI Research's Detectron2 CNN: https://github.com/facebookresearch/detectron2
+Performs frame by frame object detection and segmentation
+NOTE: Makes use of the variable naming and calling conventions found in the library's predictor script
+'''
 class ObjectDetect:
     # Initialize the predictor
     def __init__(self, model_yaml, weights):
@@ -861,6 +830,8 @@ def writeFrame(frameNum):
 
         # NOTE: No stream for geo_projection as it is rendered in the Open3D visualizer
         if m == 'geo_projection':
+            if debugging:
+                print("Adding points in frame", frameNum, "to global point cloud")
             o3d.io.write_point_cloud(outputWriter[m], outputFrame['geo_projection'])
             continue
 
@@ -879,17 +850,18 @@ outputFrame = {
     'geo_projection': None
 }
 
+# -----------------------NEW CELL--------------------------------------------------------
 
 ############################
 #### User Configuration ####
-############################
+################################################################################################
 
 # Initial configuration for input and output rendering settings
 args = {
     'leftcam': 'video/model_train_track_trim.mp4', # Path to left camera video or mono video
     'rightcam': None,               # Path to right camera video if stereo is enabled
     'output': 'OUTPUT/',            # Path to rendering output
-    'endframe': None              # Total number of video frames to process
+    'endframe': None              # Total number of video frames to process. None = All
 }
 
 # Verbose execution
@@ -921,7 +893,7 @@ settingsModules = {
 }
 
 
-############################
+################################################################################################
 ####    Run MultiSlam   ####
 ############################
 
