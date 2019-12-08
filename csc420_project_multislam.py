@@ -616,9 +616,22 @@ class GeoProjection():
 
         # If using live mode, create the visualizer window.
         if self.mode == 'online':
-            self.vis = o3d.visualization.Visualizer()
+            # self.vis = o3d.visualization.Visualizer()
+            self.vis = o3d.visualization.VisualizerWithKeyCallback()
             self.vis.create_window()
+            
+            # Fix from https://github.com/intel-isl/Open3D/issues/497
+            self.vis.register_key_callback(ord("C"), self.center_view)
     
+    # Fix from https://github.com/intel-isl/Open3D/issues/497
+    def center_view(self, vis):
+        vis.reset_view_point(True)
+        ctr = vis.get_view_control()
+        ctr.rotate(180, 90.0)
+        # ctr.change_field_of_view(step=90.0)
+        # self.vis.run()
+        # self.vis.destroy_window()
+
     # In live mode, update the visualizer to show the updated point cloud
     def update(self):
         self.vis.update_geometry()
@@ -719,6 +732,10 @@ class GeoProjection():
             self.pcd = copy.deepcopy(cur_pcd)
             if self.mode == 'online':
                 self.vis.add_geometry(self.pcd)
+                # ctr = self.vis.get_view_control()
+                # ctr.change_field_of_view(step=90.0)
+                # self.vis.run()
+                # self.vis.destroy_window()
         else:
             self.pcd += cur_pcd
 
@@ -762,7 +779,7 @@ class ObjectDetect:
 # The main rendering loop. Combines the SLAM modules together to create
 # a mapping of the provided environment video or file stream.
 def mslam():
-    global vs, enableModules, outputFrame, length, settingsModules, debugging
+    global vs, enableModules, outputFrame, length, settingsModules, debugging, live_stream
     
     # Initialize modules
     mod_object_detection = None
@@ -785,7 +802,10 @@ def mslam():
     if enableModules['agent_locate']:
         mod_agent_locate = AgentLocate(debugging=debugging)
     if enableModules['geo_projection']:
-        mod_geo_projection = GeoProjection(mode='offline')
+        if live_stream:
+            mod_geo_projection = GeoProjection(mode='online')
+        else:
+            mod_geo_projection = GeoProjection(mode='offline')
 
     if debugging:
         print("Done initializing modules")
@@ -797,12 +817,14 @@ def mslam():
         isValid, frame = vs.read()
         if not isValid: # No more frames
             break
+        outputFrame['original_L'] = frame.copy()
         
         # Get next frame for right camera
         if enableModules['stereo_depth']:
             isValid, frame2 = vs2.read()
             if not isValid:
                 break
+            outputFrame['original_R'] = frame2.copy()
 
         if enableModules['mono_depth']:
             outputFrame['mono_depth'] = mod_mono_depth.estimate(frame.copy())
@@ -847,7 +869,9 @@ outputFrame = {
     'mono_depth': None,
     'stereo_depth': None,
     'agent_locate': None,
-    'geo_projection': None
+    'geo_projection': None,
+    'original_L': None,
+    'original_R': None,
 }
 
 # -----------------------NEW CELL--------------------------------------------------------
@@ -861,19 +885,24 @@ args = {
     'leftcam': 'video/model_train_track_trim.mp4', # Path to left camera video or mono video
     'rightcam': None,               # Path to right camera video if stereo is enabled
     'output': 'OUTPUT/',            # Path to rendering output
-    'endframe': None              # Total number of video frames to process. None = All
+    'endframe': None,              # Total number of video frames to process. None = All
+    'ip': '0.0.0.0',
+    'port': '8000',
 }
 
 # Verbose execution
 debugging = False
 
-# Enable or disable the modules in use. For a complete slam system, enable all.
+# Live stream the output
+live_stream = True
+
+# Enable or disable the modules for debugging. For a complete slam system, enable all* (*choose one of mono or stereo depth).
 enableModules = {
     'object_detection': False,
     'stereo_depth': False,
     'agent_locate': True,
-    'mono_depth': True,         # <----
-    'geo_projection': True,     # -----^ dependency
+    'mono_depth': True,
+    'geo_projection': True,     # depends on depth and agent_locate
 }
 
 # Module specific settings
@@ -927,7 +956,60 @@ t = threading.Thread(target=mslam)
 t.daemon = True
 t.start()
 
+if live_stream:
+    from flask import Response
+    from flask import Flask
+    from flask import render_template
+    
+    app = Flask(__name__)
+
+    def generateStreamFrame(moduleName):
+        global outputFrame
+
+        while True:
+            if outputFrame[moduleName] is None:
+                continue
+
+            (flag, encodedImage) = cv2.imencode(".jpg", outputFrame[moduleName])
+
+            if not flag:
+                continue
+    
+            yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + 
+                bytearray(encodedImage) + b'\r\n')
+
+    @app.route("/multislam_stream_original_L")
+    def stream_original_L():
+        return Response(generateStreamFrame('original_L'),
+            mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+    @app.route("/multislam_stream_original_R")
+    def stream_original_R():
+        return Response(generateStreamFrame('original_R'),
+            mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+    @app.route("/multislam_stream_object_detection")
+    def stream_object_detection():
+        return Response(generateStreamFrame('object_detection'),
+            mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+    @app.route("/multislam_stream_mono_depth")
+    def stream_mono_depth():
+        return Response(generateStreamFrame('mono_depth'),
+            mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+    @app.route("/multislam_stream_stereo_depth")
+    def stream_stereo_depth():
+        return Response(generateStreamFrame('stereo_depth'),
+            mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+    @app.route("/multislam_stream_agent_locate")
+    def stream_agent_locate():
+        return Response(generateStreamFrame('agent_locate'),
+            mimetype = "multipart/x-mixed-replace; boundary=frame")
+    
+    app.run(host=args["ip"], port=args["port"], debug=False, threaded=True, use_reloader=False)
+
 # Wait for thread to finish
 t.join()
-
 print("Done processing video. Output has been saved in:", args['output'])
