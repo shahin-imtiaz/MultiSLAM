@@ -182,6 +182,7 @@ from PIL import Image
 import matplotlib as mpl
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
+from scipy import stats
 
 import torchvision
 import torch
@@ -238,6 +239,24 @@ class AgentLocate:
         self.flannGlobal = None
         if self.enableGlobal:
             self.flannGlobal = cv2.FlannBasedMatcher(self.index_params,self.search_params)
+        
+        self.smooth_history = 10
+        self.smooth_x_magnitude = []
+        self.smooth_y_magnitude = []
+        self.smooth_translate = []
+        self.smooth_rotate = []
+        self.letter_to_move = {
+            's': 0,
+            'f': 1,
+            'r': 2,
+            'l': 3,
+        }
+        self.move_to_letter = {
+            0: 's',
+            1: 'f', 
+            2: 'r', 
+            3: 'l', 
+        }
 
     # Return the descriptors saved in the given flann matcher
     def getTrainDescriptors(self, matcher):
@@ -248,13 +267,53 @@ class AgentLocate:
         return None
 
     # Returns True iff a given keypoint is a euclidean distance of 20 away from ALL other saved keypoints
-    def isApart(self, kp, kpList, thresh=15):
+    # And it is not in the middle region
+    def pruneKP(self, kp, kpList, middle, thresh=50):
         cur_pt = np.array(kp.pt)
+        if np.linalg.norm(cur_pt - middle) < 200:
+                return False
         for i in kpList:
             i_pt = np.array(i.pt)
             if np.linalg.norm(cur_pt - i_pt) < thresh:
                 return False
         return True
+
+    def smoothMove(self, mov):
+        if len(self.smooth_translate) < self.smooth_history:
+            self.smooth_translate.append(mov[0])
+            self.smooth_rotate.append(mov[1])
+            self.smooth_x_magnitude.append(mov[2])
+            self.smooth_y_magnitude.append(mov[3])
+            out = [max(set(self.smooth_translate), key=self.smooth_translate.count),
+                    max(set(self.smooth_rotate), key=self.smooth_rotate.count),
+                    max(set(self.smooth_x_magnitude), key=self.smooth_x_magnitude.count),
+                    max(set(self.smooth_y_magnitude), key=self.smooth_y_magnitude.count)]
+            if self.debugging:
+                if out[2] is None or out[3] is None:
+                    print(out, 'mag=', None)
+                else:
+                    print(out, 'mag=', np.hypot(out[2], out[3]))
+            return out
+        
+        self.smooth_translate.pop(0)
+        self.smooth_rotate.pop(0)
+        self.smooth_x_magnitude.pop(0)
+        self.smooth_y_magnitude.pop(0)
+        self.smooth_translate.append(mov[0])
+        self.smooth_rotate.append(mov[1])
+        self.smooth_x_magnitude.append(mov[2])
+        self.smooth_y_magnitude.append(mov[3])
+        out = [max(set(self.smooth_translate), key=self.smooth_translate.count),
+                max(set(self.smooth_rotate), key=self.smooth_rotate.count),
+                max(set(self.smooth_x_magnitude), key=self.smooth_x_magnitude.count),
+                max(set(self.smooth_y_magnitude), key=self.smooth_y_magnitude.count)]
+        if self.debugging:
+            if out[2] is None or out[3] is None:
+                print(out, 'mag=', None)
+            else:
+                print(out, 'mag=', np.hypot(out[2], out[3]))
+        return out
+        
 
     # Return the camera translation and rotation matrix for the movement between frames
     def getViewTransform(self, matches, kp, imgShape):
@@ -264,6 +323,10 @@ class AgentLocate:
         quads_x = np.zeros((4,4))
         quads_y = np.zeros((4,4))
 
+        # Initialize with a constant value, otherwise median of an empty list = NaN
+        x_magnitude = [0.00005]
+        y_magnitude = [0.00005]
+
         # Reduce the difference in each axis for matching points to a numerical sign and sum over differences in each quadrant
         # Place it in the quadrant belonging to the x, y location of the keypoint in the current frame.
         for i in range(len(matches)):
@@ -271,13 +334,20 @@ class AgentLocate:
             xh, yh = self.prevFrameKP[matches[i][0].trainIdx].pt
             qx = int(x // quad_width)
             qy = int(y // quad_height)
+            x_diff = x-xh
+            y_diff = y-yh
 
-            if x-xh < 0:
+            if qy in [0, 3]:
+                x_magnitude.append(abs(x_diff))
+            if qx in [0, 3]:
+                y_magnitude.append(abs(y_diff))
+
+            if x_diff < 0:
                 quads_x[qy, qx] -= 1
             else:
                 quads_x[qy, qx] += 1
             
-            if y-yh < 0:
+            if y_diff < 0:
                 quads_y[qy, qx] -= 1
             else:
                 quads_y[qy, qx] += 1
@@ -307,48 +377,64 @@ class AgentLocate:
         # Rotate the camera down iff:
         #   - Majority of Y quadrants are 0 or negative
         
+        # [translation, rotation, x magnitude, y magnitude]
+        mov = [None, None, np.median(x_magnitude), np.median(y_magnitude)]
+
         if (np.sum(quads_y[0]) == 0 and np.sum(quads_y[3]) == 0 and
             np.sum(quads_x[:,0]) == 0 and np.sum(quads_x[:,3]) == 0):
-            if self.debugging:
-                print('Staying')
-            return ('s')
+            # if self.debugging:
+            #     print('Staying')
+            mov[0] = 's'
         elif (np.sum(quads_y[0]) <= 0 and np.sum(quads_y[3]) >= 0 and
             np.sum(quads_x[:,0]) <= 0 and np.sum(quads_x[:,3]) >= 0):
-            if self.debugging:
-                print('Moving Forward')
-            return ('f')
-        elif (np.sum(quads_x) <= 0):
-            if self.debugging:
-                print('Rotate Right')
-            return 'r'
-        elif (np.sum(quads_x) >= 0):
-            if self.debugging:
-                print('Rotate Left')
-            return 'l'
-        elif (np.sum(quads_y) <= 0):
-            if self.debugging:
-                print('Rotate Down')
-            return 'd'
-        elif (np.sum(quads_y) >= 0):
-            if self.debugging:
-                print('Rotate Up')
-            return 'u'
+            # if self.debugging:
+            #     print('Moving Forward')
+            mov[0] = 'f'
+        
+        # x_sum = stats.mode([quads_x[0,0], quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[0,1], quads_x[0,2], quads_x[0,3], quads_x[1,3], quads_x[2,3], quads_x[3,3]])[0][0]
+        # x_sum = np.median([quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[1,3], quads_x[2,3], quads_x[3,3]])
+        x_sum = np.median(quads_x)
+        print('xsum is:', x_sum)
+        if (x_sum < 0):
+            # if self.debugging:
+            #     print('Rotate Right', x_sum)
+            mov[1] = 'r'
+        elif (x_sum > 0):
+            # if self.debugging:
+            #     print('Rotate Left', x_sum)
+            mov[1] = 'l'
+        # elif (np.sum(quads_y) < 0):
+        #     if self.debugging:
+        #         print('Rotate Down')
+        #     mov[1] = 'd'
+        # elif (np.sum(quads_y) > 0):
+        #     if self.debugging:
+        #         print('Rotate Up')
+        #     mov[1] = 'u'
+        else:
+            pass
+            # if self.debugging:
+                # print('No Rotate', x_sum)
 
         # No movement
-        return None
+        return self.smoothMove(mov)
 
     # Compute the change in agent location based on previous frame
-    def estimate(self, img, kpNum=50):
+    def estimate(self, img, kpNum=500):
         kp, des = self.sift.detectAndCompute(img,None)
+        if len(kp) == 0 or des is None:
+            return {'frame': np.zeros(img.shape, dtype='uint8') * 255, 'transform': [None, None, None, None]}
 
         # Sort keypoints by response
         kp, des = zip(*(sorted(zip(kp, des), key=lambda x: x[0].response, reverse=True)))
         
         # Prune keypoints that are close together
+        # And around the middle of the frame
         kp_apart = []
         des_apart = []
+        middle = np.array([img.shape[1]//2, img.shape[0]//2])
         for i in range(len(kp)):
-            if self.isApart(kp[i], kp_apart):
+            if self.pruneKP(kp[i], kp_apart, middle):
                 kp_apart.append(kp[i])
                 des_apart.append(des[i])
 
@@ -369,7 +455,7 @@ class AgentLocate:
                 self.flannGlobal.train()
 
             self.prevFrameKP = kp
-            return np.zeros(img.shape, dtype='uint8') * 255, None
+            return {'frame': np.zeros(img.shape, dtype='uint8') * 255, 'transform': [None, None, None, None]}
 
         # Match the current frame with the previous one
         matchesFrameByFrame = self.flannFrameByFrame.knnMatch(np.array(des), k=1)
@@ -390,7 +476,7 @@ class AgentLocate:
         self.prevFrameKP = kp
         outKPFrame = cv2.drawKeypoints(img,kp,img,flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
         
-        return outKPFrame, transform
+        return {'frame': outKPFrame, 'transform': transform}
 
 '''
 Monocular Depth
@@ -612,30 +698,30 @@ class GeoProjection():
         self.xyz = np.zeros(3, dtype='float64')
         self.rot = np.zeros((3,1), dtype='float64')
         self.vis = None
-        self.fwd = 0.00005
+        # self.fwd = 0.00005
 
         # If using live mode, create the visualizer window.
         if self.mode == 'online':
-            # self.vis = o3d.visualization.Visualizer()
-            self.vis = o3d.visualization.VisualizerWithKeyCallback()
+            self.vis = o3d.visualization.Visualizer()
+            # self.vis = o3d.visualization.VisualizerWithKeyCallback()
             self.vis.create_window()
             
             # Fix from https://github.com/intel-isl/Open3D/issues/497
-            self.vis.register_key_callback(ord("C"), self.center_view)
+            # self.vis.register_key_callback(ord("C"), self.center_view)
     
     # Fix from https://github.com/intel-isl/Open3D/issues/497
     def center_view(self, vis):
         vis.reset_view_point(True)
         ctr = vis.get_view_control()
         ctr.rotate(180, 90.0)
-        # ctr.change_field_of_view(step=90.0)
-        # self.vis.run()
-        # self.vis.destroy_window()
 
     # In live mode, update the visualizer to show the updated point cloud
     def update(self):
         self.vis.update_geometry()
         self.vis.poll_events()
+        self.vis.reset_view_point(True)
+        ctr = self.vis.get_view_control()
+        ctr.rotate(0, 500)
         self.vis.update_renderer()
         # time.sleep(5)
 
@@ -655,26 +741,34 @@ class GeoProjection():
 
     # Move a single frame's point cloud to match it's location in the global map
     def movePoints(self, pcd, transformID):
+        # vecotor magnitidue from addition of x and y component
+        if transformID[2] is None or transformID[3] is None:
+            magnitude = 0.00005
+        else:
+            magnitude = np.hypot(transformID[2], transformID[3]) / 100000
+
         # Forward
-        if transformID == 'f':
+        if transformID[0] == 'f':
             # Forward movement is mapped to the X-Z plane based on the vector angle of the current rotation
             #   ^                       |
             #   |                       |   
             #   |       <------         |           ------->
             #   | 0d            90d     v 180d               270d
-            self.xyz += np.array([np.sin(self.rot[1][0])*self.fwd, 0, np.cos(self.rot[1][0])*self.fwd])
+            self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
         # Rotate right (Y axis)
-        elif transformID == 'r':
-            self.rot += np.array([0,0.12,0]).reshape(3,1)
+        if transformID[1] == 'r':
+            self.rot += np.array([0,0.012,0]).reshape(3,1)
+            self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
         # Rotate left (Y axis)
-        elif transformID == 'l':
-            self.rot += np.array([0,-0.12,0]).reshape(3,1)
+        elif transformID[1] == 'l':
+            self.rot += np.array([0,-0.012,0]).reshape(3,1)
+            self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
         # Rotate up (X axis)
-        elif transformID == 'u':
-            self.rot += np.array([-0.12,0,0]).reshape(3,1)
+        elif transformID[1] == 'u':
+            self.rot += np.array([-0.012,0,0]).reshape(3,1)
         # Rotate down (X axis)
-        elif transformID == 'd':
-            self.rot += np.array([0.12,0,0]).reshape(3,1)
+        elif transformID[1] == 'd':
+            self.rot += np.array([0.012,0,0]).reshape(3,1)
 
         # Apply transformation
         cur_pcd = pcd.translate(self.xyz)
@@ -683,6 +777,8 @@ class GeoProjection():
 
     # Add the point cloud from the current frame to the global point cloud of the map
     def estimate(self, img_colour, img_depth, transformID, crop_fact_h=0.8, crop_fact_w=0.7, downsample=20):
+        img_colour = cv2.cvtColor(img_colour, cv2.COLOR_BGR2RGB)
+
         # Crop the frame to reduce boundary depth noise
         h, w = img_colour.shape[:2]
         crop_h = int((h - (crop_fact_h*h)) / 2)
@@ -695,7 +791,7 @@ class GeoProjection():
         img_od3_depth = o3d.geometry.Image(img_depth)
         
         # Create a point cloud from the current frame and transform it so it is right side up
-        rgbd_img = o3d.geometry.RGBDImage.create_from_color_and_depth(img_od3_colour, img_od3_depth)
+        rgbd_img = o3d.geometry.RGBDImage.create_from_color_and_depth(img_od3_colour, img_od3_depth, convert_rgb_to_intensity=False)
         cur_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
             rgbd_img,
             o3d.camera.PinholeCameraIntrinsic(
@@ -743,6 +839,10 @@ class GeoProjection():
         if self.mode == 'online':
             self.update()
         
+        outputFrame['geo_projection'] = cv2.cvtColor(cv2.normalize(np.asarray(
+                                                    self.vis.capture_screen_float_buffer(True)),
+                                                    None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1), cv2.COLOR_RGB2BGR)
+
         return self.pcd
 
 '''
@@ -831,11 +931,13 @@ def mslam():
         if enableModules['stereo_depth']:
             outputFrame['stereo_depth'] = mod_stereo_depth.estimate(frame.copy())
         if enableModules['agent_locate']:
-            outputFrame['agent_locate'], al_transform = mod_agent_locate.estimate(frame.copy())
+            out_agent_locate = mod_agent_locate.estimate(frame.copy())
+            outputFrame['agent_locate'] = out_agent_locate['frame']
+            al_transform = out_agent_locate['transform']
         if enableModules['object_detection']:
             outputFrame['object_detection'] = mod_object_detection.estimate(frame.copy())
         if enableModules['geo_projection']:
-            outputFrame['geo_projection'] = mod_geo_projection.estimate(frame.copy(), outputFrame['mono_depth'].copy(), al_transform, downsample=1000)
+            outputFrame['geo_projection_pcd'] = mod_geo_projection.estimate(frame.copy(), outputFrame['mono_depth'].copy(), al_transform, downsample=1000)
         
         writeFrame(i)
 
@@ -851,10 +953,10 @@ def writeFrame(frameNum):
             continue
 
         # NOTE: No stream for geo_projection as it is rendered in the Open3D visualizer
-        if m == 'geo_projection':
+        if m == 'geo_projection_pcd' or m == 'geo_projection':
             if debugging:
                 print("Adding points in frame", frameNum, "to global point cloud")
-            o3d.io.write_point_cloud(outputWriter[m], outputFrame['geo_projection'])
+            o3d.io.write_point_cloud(outputWriter[m], outputFrame['geo_projection_pcd'])
             continue
 
         if debugging:
@@ -870,6 +972,7 @@ outputFrame = {
     'stereo_depth': None,
     'agent_locate': None,
     'geo_projection': None,
+    'geo_projection_pcd': None,
     'original_L': None,
     'original_R': None,
 }
@@ -882,7 +985,12 @@ outputFrame = {
 
 # Initial configuration for input and output rendering settings
 args = {
-    'leftcam': 'video/model_train_track_trim.mp4', # Path to left camera video or mono video
+    # 'leftcam': 'video/speed_walk_trim2.mp4', # Path to left camera video or mono video
+    # 'leftcam': 'video/model_train_track_trim.mp4',
+    # 'leftcam': 'video/car_racetrack_480p.mp4',
+    'leftcam': 'video/driving_country_480p_trimmed.mp4',
+    # 'leftcam': 'video/driving_city_480p.mp4',
+    # 'leftcam': 'video/tokyo_train_360p.mp4',
     'rightcam': None,               # Path to right camera video if stereo is enabled
     'output': 'OUTPUT/',            # Path to rendering output
     'endframe': None,              # Total number of video frames to process. None = All
@@ -891,7 +999,7 @@ args = {
 }
 
 # Verbose execution
-debugging = False
+debugging = True
 
 # Live stream the output
 live_stream = True
@@ -1006,6 +1114,11 @@ if live_stream:
     @app.route("/multislam_stream_agent_locate")
     def stream_agent_locate():
         return Response(generateStreamFrame('agent_locate'),
+            mimetype = "multipart/x-mixed-replace; boundary=frame")
+
+    @app.route("/multislam_stream_geo_projection")
+    def stream_geo_projection():
+        return Response(generateStreamFrame('geo_projection'),
             mimetype = "multipart/x-mixed-replace; boundary=frame")
     
     app.run(host=args["ip"], port=args["port"], debug=False, threaded=True, use_reloader=False)
