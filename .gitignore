@@ -1,2 +1,5 @@
 env-*/
-detectron*/
+
+hd3_repo
+detectron2_repo
+monodepth2_repo
