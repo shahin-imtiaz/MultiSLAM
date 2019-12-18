@@ -38,8 +38,8 @@ For: University of Toronto CSC420 - Intro to Image Understanding Fall 2019 <br /
 * [mslam/agent_loc](mslam/agent_loc):
     - [agent_loc.py](mslam/agent_loc/agent_loc.py): Determine agent movement in 3D space
 * [mslam/depth](mslam/depth):
-    - [mono.py](mslam/depth/depth.py): Compute mono depth information from a single image
-    - [stereo_cnn.py](mslam/depth/depth.py): Compute stereo depth information from a two images
+    - [mono.py](mslam/depth/mono.py): Compute mono depth information from a single image
+    - [stereo_CNN.py](mslam/depth/stereo_CNN.py): Compute stereo depth information from a two images
 * [mslam/geo_proj](mslam/geo_proj):
     - [geo_proj.py](mslam/geo_proj/geo_proj.py): Construct the scene point cloud and track agent location
 * [mslam/img_stitch](mslam/img_stitch):
