@@ -1,12 +1,19 @@
 # MultiSLAM
-Enhanced Real-Time Multi-Camera SLAM for 3D Scene Reconstruction
-By: Mansoor Saqib & Shahin Imtiaz
-For: University of Toronto CSC420 - Intro to Image Understanding Fall 2019
+Enhanced Real-Time Multi-Camera SLAM for 3D Scene Reconstruction <br />
+By: Mansoor Saqib & Shahin Imtiaz <br />
+For: University of Toronto CSC420 - Intro to Image Understanding Fall 2019 <br />
 
 ## Running on CDF
 
 > $ bash mslam_setup_cdf.sh
+>
 > $ python3 mslam.py
+>
+> To view constructed 3D point cloud of map:
+>
+> $ python3 mslam_vis_pcd.py
+>
+> User configurable options are located inside mslam.py
 
 ## Personal Dev Environment Setup
 >   $ sudo apt-get install python-dev python3-dev
@@ -26,7 +33,8 @@ For: University of Toronto CSC420 - Intro to Image Understanding Fall 2019
 >   (env-mslam) $ python3 -m pip install -e detectron2_repo
 
 ## Package contents
-* [mslam/main.py](mslam/main.py): Entrypoint to run MultiSLAM
+* [mslam.py](mslam.py): Entrypoint to run MultiSLAM
+* [mslam_vis_pcd.py](mslam_vis_pcd.py): View 3D point cloud of map
 * [mslam/agent_loc](mslam/agent_loc):
     - [agent_loc.py](mslam/agent_loc/agent_loc.py): Determine agent movement in 3D space
 * [mslam/depth](mslam/depth):
