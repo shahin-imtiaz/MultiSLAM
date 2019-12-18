@@ -198,16 +198,22 @@ import torch.optim
 import torch.utils.data
 from torchvision import transforms, datasets
 
-import detectron2
-from detectron2.utils.logger import setup_logger
-from detectron2.engine import DefaultPredictor
-from detectron2.config import get_cfg
-from detectron2.utils.visualizer import Visualizer
-from detectron2.data import MetadataCatalog
+from mslam.agent_loc.agent_loc import AgentLocate
+from mslam.depth.mono import MonoDepth
+from mslam.geo_proj.geo_proj import GeoProjection
+# from mslam.depth.stereo_CNN import StereoDepthCNN
+from mslam.obj_rec.obj_rec import ObjectDetect
 
-import monodepth2_repo.networks as networks
-from monodepth2_repo.layers import disp_to_depth
-from monodepth2_repo.utils import download_model_if_doesnt_exist
+# import detectron2
+# from detectron2.utils.logger import setup_logger
+# from detectron2.engine import DefaultPredictor
+# from detectron2.config import get_cfg
+# from detectron2.utils.visualizer import Visualizer
+# from detectron2.data import MetadataCatalog
+
+# import monodepth2_repo.networks as networks
+# from monodepth2_repo.layers import disp_to_depth
+# from monodepth2_repo.utils import download_model_if_doesnt_exist
 
 # import hd3.data.hd3data as datasets
 # import hd3.data.flowtransforms as transforms
@@ -221,674 +227,674 @@ from monodepth2_repo.utils import download_model_if_doesnt_exist
 #### MultiSlam Modules  ####
 ############################
 
-'''
-Agent Location
-Utilizes the OpenCV library: https://opencv.org/
-Computes the movement of the agent based on frame by frame differences
-'''
-class AgentLocate:
-    # Initialize SIFT and Flann Matcher
-    def __init__(self, kpNum=1000, enableGlobal=False, match_threshold=200, debugging=False):
-        self.debugging = debugging
-        self.kpNum = kpNum  # Max keypoints to detect
-        self.match_threshold = match_threshold # Distance threshold
-        self.enableGlobal = enableGlobal
+# '''
+# Agent Location
+# Utilizes the OpenCV library: https://opencv.org/
+# Computes the movement of the agent based on frame by frame differences
+# '''
+# class AgentLocate:
+#     # Initialize SIFT and Flann Matcher
+#     def __init__(self, kpNum=1000, enableGlobal=False, match_threshold=200, debugging=False):
+#         self.debugging = debugging
+#         self.kpNum = kpNum  # Max keypoints to detect
+#         self.match_threshold = match_threshold # Distance threshold
+#         self.enableGlobal = enableGlobal
 
-        self.sift = cv2.xfeatures2d.SIFT_create(self.kpNum)
-        self.FLANN_INDEX_KDTREE = 1
-        self.index_params = dict(algorithm = self.FLANN_INDEX_KDTREE, trees = 5)
-        self.search_params = dict(checks=50)
-        self.flannFrameByFrame = cv2.FlannBasedMatcher(self.index_params,self.search_params)
-        self.prevFrameKP = None
+#         self.sift = cv2.xfeatures2d.SIFT_create(self.kpNum)
+#         self.FLANN_INDEX_KDTREE = 1
+#         self.index_params = dict(algorithm = self.FLANN_INDEX_KDTREE, trees = 5)
+#         self.search_params = dict(checks=50)
+#         self.flannFrameByFrame = cv2.FlannBasedMatcher(self.index_params,self.search_params)
+#         self.prevFrameKP = None
         
-        self.flannGlobal = None
-        if self.enableGlobal:
-            self.flannGlobal = cv2.FlannBasedMatcher(self.index_params,self.search_params)
+#         self.flannGlobal = None
+#         if self.enableGlobal:
+#             self.flannGlobal = cv2.FlannBasedMatcher(self.index_params,self.search_params)
         
-        self.smooth_history = 8
-        self.smooth_x_magnitude = []
-        self.smooth_y_magnitude = []
-        self.smooth_translate = []
-        self.smooth_rotate = []
-        self.letter_to_move = {
-            's': 0,
-            'f': 1,
-            'r': 2,
-            'l': 3,
-        }
-        self.move_to_letter = {
-            0: 's',
-            1: 'f', 
-            2: 'r', 
-            3: 'l', 
-        }
+#         self.smooth_history = 8
+#         self.smooth_x_magnitude = []
+#         self.smooth_y_magnitude = []
+#         self.smooth_translate = []
+#         self.smooth_rotate = []
+#         self.letter_to_move = {
+#             's': 0,
+#             'f': 1,
+#             'r': 2,
+#             'l': 3,
+#         }
+#         self.move_to_letter = {
+#             0: 's',
+#             1: 'f', 
+#             2: 'r', 
+#             3: 'l', 
+#         }
 
-    # Return the descriptors saved in the given flann matcher
-    def getTrainDescriptors(self, matcher):
-        if matcher == "global" and self.enableGlobal:
-            return self.flannGlobal.getTrainDescriptors()
-        elif matcher == "frameByframe":
-            return self.flannFrameByFrame.getTrainDescriptors()
-        return None
+#     # Return the descriptors saved in the given flann matcher
+#     def getTrainDescriptors(self, matcher):
+#         if matcher == "global" and self.enableGlobal:
+#             return self.flannGlobal.getTrainDescriptors()
+#         elif matcher == "frameByframe":
+#             return self.flannFrameByFrame.getTrainDescriptors()
+#         return None
 
-    # Returns True iff a given keypoint is a euclidean distance of 20 away from ALL other saved keypoints
-    # And it is not in the middle region
-    def pruneKP(self, kp, kpList, middle, thresh=30):
-        cur_pt = np.array(kp.pt)
-        if np.linalg.norm(cur_pt - middle) < 100:
-                return False
-        for i in kpList:
-            i_pt = np.array(i.pt)
-            if np.linalg.norm(cur_pt - i_pt) < thresh:
-                return False
-        return True
+#     # Returns True iff a given keypoint is a euclidean distance of 20 away from ALL other saved keypoints
+#     # And it is not in the middle region
+#     def pruneKP(self, kp, kpList, middle, thresh=30):
+#         cur_pt = np.array(kp.pt)
+#         if np.linalg.norm(cur_pt - middle) < 100:
+#                 return False
+#         for i in kpList:
+#             i_pt = np.array(i.pt)
+#             if np.linalg.norm(cur_pt - i_pt) < thresh:
+#                 return False
+#         return True
 
-    def smoothMove(self, mov):
-        if len(self.smooth_translate) < self.smooth_history:
-            self.smooth_translate.append(mov[0])
-            self.smooth_rotate.append(mov[1])
-            self.smooth_x_magnitude.append(mov[2])
-            self.smooth_y_magnitude.append(mov[3])
-            out = [max(set(self.smooth_translate), key=self.smooth_translate.count),
-                    max(set(self.smooth_rotate), key=self.smooth_rotate.count),
-                    max(set(self.smooth_x_magnitude), key=self.smooth_x_magnitude.count),
-                    max(set(self.smooth_y_magnitude), key=self.smooth_y_magnitude.count)]
-            if self.debugging:
-                if out[2] is None or out[3] is None:
-                    print(out, 'mag=', None)
-                else:
-                    print(out, 'mag=', np.hypot(out[2], out[3]))
-            return out
+#     def smoothMove(self, mov):
+#         if len(self.smooth_translate) < self.smooth_history:
+#             self.smooth_translate.append(mov[0])
+#             self.smooth_rotate.append(mov[1])
+#             self.smooth_x_magnitude.append(mov[2])
+#             self.smooth_y_magnitude.append(mov[3])
+#             out = [max(set(self.smooth_translate), key=self.smooth_translate.count),
+#                     max(set(self.smooth_rotate), key=self.smooth_rotate.count),
+#                     max(set(self.smooth_x_magnitude), key=self.smooth_x_magnitude.count),
+#                     max(set(self.smooth_y_magnitude), key=self.smooth_y_magnitude.count)]
+#             if self.debugging:
+#                 if out[2] is None or out[3] is None:
+#                     print(out, 'mag=', None)
+#                 else:
+#                     print(out, 'mag=', np.hypot(out[2], out[3]))
+#             return out
         
-        self.smooth_translate.pop(0)
-        self.smooth_rotate.pop(0)
-        self.smooth_x_magnitude.pop(0)
-        self.smooth_y_magnitude.pop(0)
-        self.smooth_translate.append(mov[0])
-        self.smooth_rotate.append(mov[1])
-        self.smooth_x_magnitude.append(mov[2])
-        self.smooth_y_magnitude.append(mov[3])
-        out = [max(set(self.smooth_translate), key=self.smooth_translate.count),
-                max(set(self.smooth_rotate), key=self.smooth_rotate.count),
-                max(set(self.smooth_x_magnitude), key=self.smooth_x_magnitude.count),
-                max(set(self.smooth_y_magnitude), key=self.smooth_y_magnitude.count)]
-        if self.debugging:
-            if out[2] is None or out[3] is None:
-                print(out, 'mag=', None)
-            else:
-                print(out, 'mag=', np.hypot(out[2], out[3]))
-        return out
+#         self.smooth_translate.pop(0)
+#         self.smooth_rotate.pop(0)
+#         self.smooth_x_magnitude.pop(0)
+#         self.smooth_y_magnitude.pop(0)
+#         self.smooth_translate.append(mov[0])
+#         self.smooth_rotate.append(mov[1])
+#         self.smooth_x_magnitude.append(mov[2])
+#         self.smooth_y_magnitude.append(mov[3])
+#         out = [max(set(self.smooth_translate), key=self.smooth_translate.count),
+#                 max(set(self.smooth_rotate), key=self.smooth_rotate.count),
+#                 max(set(self.smooth_x_magnitude), key=self.smooth_x_magnitude.count),
+#                 max(set(self.smooth_y_magnitude), key=self.smooth_y_magnitude.count)]
+#         if self.debugging:
+#             if out[2] is None or out[3] is None:
+#                 print(out, 'mag=', None)
+#             else:
+#                 print(out, 'mag=', np.hypot(out[2], out[3]))
+#         return out
         
 
-    # Return the camera translation and rotation matrix for the movement between frames
-    def getViewTransform(self, matches, kp, imgShape):
-        # Divide the image into 4x4 quadrants for each axis
-        quad_width = imgShape[1] / 4
-        quad_height = imgShape[0] / 4
-        quads_x = np.zeros((4,4))
-        quads_y = np.zeros((4,4))
+#     # Return the camera translation and rotation matrix for the movement between frames
+#     def getViewTransform(self, matches, kp, imgShape):
+#         # Divide the image into 4x4 quadrants for each axis
+#         quad_width = imgShape[1] / 4
+#         quad_height = imgShape[0] / 4
+#         quads_x = np.zeros((4,4))
+#         quads_y = np.zeros((4,4))
 
-        # Initialize with a constant value, otherwise median of an empty list = NaN
-        x_magnitude = [0.00005]
-        y_magnitude = [0.00005]
+#         # Initialize with a constant value, otherwise median of an empty list = NaN
+#         x_magnitude = [0.00005]
+#         y_magnitude = [0.00005]
 
-        # Reduce the difference in each axis for matching points to a numerical sign and sum over differences in each quadrant
-        # Place it in the quadrant belonging to the x, y location of the keypoint in the current frame.
-        for i in range(len(matches)):
-            x, y = kp[matches[i][0].queryIdx].pt
-            xh, yh = self.prevFrameKP[matches[i][0].trainIdx].pt
-            qx = int(x // quad_width)
-            qy = int(y // quad_height)
-            x_diff = x-xh
-            y_diff = y-yh
+#         # Reduce the difference in each axis for matching points to a numerical sign and sum over differences in each quadrant
+#         # Place it in the quadrant belonging to the x, y location of the keypoint in the current frame.
+#         for i in range(len(matches)):
+#             x, y = kp[matches[i][0].queryIdx].pt
+#             xh, yh = self.prevFrameKP[matches[i][0].trainIdx].pt
+#             qx = int(x // quad_width)
+#             qy = int(y // quad_height)
+#             x_diff = x-xh
+#             y_diff = y-yh
 
-            if qy in [0, 3]:
-                x_magnitude.append(abs(x_diff))
-            if qx in [0, 3]:
-                y_magnitude.append(abs(y_diff))
+#             if qy in [0, 3]:
+#                 x_magnitude.append(abs(x_diff))
+#             if qx in [0, 3]:
+#                 y_magnitude.append(abs(y_diff))
 
-            quads_x[qy, qx] += x_diff
-            quads_y[qy, qx] += y_diff
+#             quads_x[qy, qx] += x_diff
+#             quads_y[qy, qx] += y_diff
 
-            if x_diff < 0:
-                quads_x[qy, qx] -= 1
-            else:
-                quads_x[qy, qx] += 1
+#             if x_diff < 0:
+#                 quads_x[qy, qx] -= 1
+#             else:
+#                 quads_x[qy, qx] += 1
             
-            if y_diff < 0:
-                quads_y[qy, qx] -= 1
-            else:
-                quads_y[qy, qx] += 1
+#             if y_diff < 0:
+#                 quads_y[qy, qx] -= 1
+#             else:
+#                 quads_y[qy, qx] += 1
 
-        # Calculate the overall numerical sign of each quadrant
-        quads_x = np.where(quads_x < 0, -1, quads_x)
-        quads_x = np.where(quads_x > 0, 1, quads_x)
-        quads_y = np.where(quads_y < 0, -1, quads_y)
-        quads_y = np.where(quads_y > 0, 1, quads_y)
+#         # Calculate the overall numerical sign of each quadrant
+#         quads_x = np.where(quads_x < 0, -1, quads_x)
+#         quads_x = np.where(quads_x > 0, 1, quads_x)
+#         quads_y = np.where(quads_y < 0, -1, quads_y)
+#         quads_y = np.where(quads_y > 0, 1, quads_y)
 
-        print("QUADS X")
-        print(quads_x)
+#         print("QUADS X")
+#         print(quads_x)
 
-        print("QUADS_Y")
-        print(quads_y)
+#         print("QUADS_Y")
+#         print(quads_y)
 
-        # Transformation logic:
-        # Move in the forward direction iff all conditions are met:
-        #   - Majority of Y quadrants in the top most row are 0 or negative
-        #   - Majority of X quadrants in the right most column are 0 or positive
-        #   - Majority of Y quadrants in the bottom most row are 0 or positive
-        #   - Majority of X quadrants in the left most column are 0 or negative
-        # 
-        # Rotate the camera right iff:
-        #   - Majority of X quadrants are 0 or negative
-        #
-        # Rotate the camera left iff:
-        #   - Majority of X quadrants are 0 or positive
-        #
-        # Rotate the camera up iff:
-        #   - Majority of Y quadrants are 0 or positive
-        #
-        # Rotate the camera down iff:
-        #   - Majority of Y quadrants are 0 or negative
+#         # Transformation logic:
+#         # Move in the forward direction iff all conditions are met:
+#         #   - Majority of Y quadrants in the top most row are 0 or negative
+#         #   - Majority of X quadrants in the right most column are 0 or positive
+#         #   - Majority of Y quadrants in the bottom most row are 0 or positive
+#         #   - Majority of X quadrants in the left most column are 0 or negative
+#         # 
+#         # Rotate the camera right iff:
+#         #   - Majority of X quadrants are 0 or negative
+#         #
+#         # Rotate the camera left iff:
+#         #   - Majority of X quadrants are 0 or positive
+#         #
+#         # Rotate the camera up iff:
+#         #   - Majority of Y quadrants are 0 or positive
+#         #
+#         # Rotate the camera down iff:
+#         #   - Majority of Y quadrants are 0 or negative
         
-        # [translation, rotation, x magnitude, y magnitude]
-        mov = [None, None, np.median(x_magnitude), np.median(y_magnitude)]
+#         # [translation, rotation, x magnitude, y magnitude]
+#         mov = [None, None, np.median(x_magnitude), np.median(y_magnitude)]
 
-        if (np.sum(quads_y[0]) == 0 and np.sum(quads_y[3]) == 0 and
-            np.sum(quads_x[:,0]) == 0 and np.sum(quads_x[:,3]) == 0):
-            # if self.debugging:
-            #     print('Staying')
-            mov[0] = 's'
-        elif (np.sum(quads_y[0]) <= 0 and np.sum(quads_y[3]) >= 0 and
-            np.sum(quads_x[:,0]) <= 0 and np.sum(quads_x[:,3]) >= 0):
-            # if self.debugging:
-            #     print('Moving Forward')
-            mov[0] = 'f'
+#         if (np.sum(quads_y[0]) == 0 and np.sum(quads_y[3]) == 0 and
+#             np.sum(quads_x[:,0]) == 0 and np.sum(quads_x[:,3]) == 0):
+#             # if self.debugging:
+#             #     print('Staying')
+#             mov[0] = 's'
+#         elif (np.sum(quads_y[0]) <= 0 and np.sum(quads_y[3]) >= 0 and
+#             np.sum(quads_x[:,0]) <= 0 and np.sum(quads_x[:,3]) >= 0):
+#             # if self.debugging:
+#             #     print('Moving Forward')
+#             mov[0] = 'f'
         
-        # x_sum = stats.mode([quads_x[0,0], quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[0,1], quads_x[0,2], quads_x[0,3], quads_x[1,3], quads_x[2,3], quads_x[3,3]])[0][0]
-        # x_sum = np.median([quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[1,3], quads_x[2,3], quads_x[3,3]])
-        # x_sum = np.median(quads_x)
-        # x_sum = np.average(quads_x)
-        x_sum = np.sum(quads_x)
-        # x_sum = scipy.stats.mode(quads_x, axis=None)[0][0]
-        # x_sum = scipy.stats.mode(np.array([quads_x[0,0], quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[0,1], quads_x[0,2], quads_x[0,3], quads_x[1,3], quads_x[2,3], quads_x[3,3]]), axis=None)[0][0]
-        print('xsum is:', x_sum)
-        if (x_sum < -2):
-            # if self.debugging:
-            #     print('Rotate Right', x_sum)
-            mov[1] = 'r'
-        elif (x_sum > 2):
-            # if self.debugging:
-            #     print('Rotate Left', x_sum)
-            mov[1] = 'l'
-        # elif (np.sum(quads_y) < 0):
-        #     if self.debugging:
-        #         print('Rotate Down')
-        #     mov[1] = 'd'
-        # elif (np.sum(quads_y) > 0):
-        #     if self.debugging:
-        #         print('Rotate Up')
-        #     mov[1] = 'u'
-        else:
-            pass
-            # if self.debugging:
-                # print('No Rotate', x_sum)
+#         # x_sum = stats.mode([quads_x[0,0], quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[0,1], quads_x[0,2], quads_x[0,3], quads_x[1,3], quads_x[2,3], quads_x[3,3]])[0][0]
+#         # x_sum = np.median([quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[1,3], quads_x[2,3], quads_x[3,3]])
+#         # x_sum = np.median(quads_x)
+#         # x_sum = np.average(quads_x)
+#         x_sum = np.sum(quads_x)
+#         # x_sum = scipy.stats.mode(quads_x, axis=None)[0][0]
+#         # x_sum = scipy.stats.mode(np.array([quads_x[0,0], quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[0,1], quads_x[0,2], quads_x[0,3], quads_x[1,3], quads_x[2,3], quads_x[3,3]]), axis=None)[0][0]
+#         print('xsum is:', x_sum)
+#         if (x_sum < -2):
+#             # if self.debugging:
+#             #     print('Rotate Right', x_sum)
+#             mov[1] = 'r'
+#         elif (x_sum > 2):
+#             # if self.debugging:
+#             #     print('Rotate Left', x_sum)
+#             mov[1] = 'l'
+#         # elif (np.sum(quads_y) < 0):
+#         #     if self.debugging:
+#         #         print('Rotate Down')
+#         #     mov[1] = 'd'
+#         # elif (np.sum(quads_y) > 0):
+#         #     if self.debugging:
+#         #         print('Rotate Up')
+#         #     mov[1] = 'u'
+#         else:
+#             pass
+#             # if self.debugging:
+#                 # print('No Rotate', x_sum)
 
-        # No movement
-        return self.smoothMove(mov)
+#         # No movement
+#         return self.smoothMove(mov)
 
-    # Compute the change in agent location based on previous frame
-    def estimate(self, img, kpNum=1000):
-        kp, des = self.sift.detectAndCompute(img,None)
-        if len(kp) == 0 or des is None:
-            return {'frame': np.zeros(img.shape, dtype='uint8') * 255, 'transform': [None, None, None, None]}
+#     # Compute the change in agent location based on previous frame
+#     def estimate(self, img, kpNum=1000):
+#         kp, des = self.sift.detectAndCompute(img,None)
+#         if len(kp) == 0 or des is None:
+#             return {'frame': np.zeros(img.shape, dtype='uint8') * 255, 'transform': [None, None, None, None]}
 
-        # Sort keypoints by response
-        kp, des = zip(*(sorted(zip(kp, des), key=lambda x: x[0].response, reverse=True)))
+#         # Sort keypoints by response
+#         kp, des = zip(*(sorted(zip(kp, des), key=lambda x: x[0].response, reverse=True)))
         
-        # Prune keypoints that are close together
-        # And around the middle of the frame
-        kp_apart = []
-        des_apart = []
-        middle = np.array([img.shape[1]//2, img.shape[0]//2])
-        for i in range(len(kp)):
-            if self.pruneKP(kp[i], kp_apart, middle):
-                kp_apart.append(kp[i])
-                des_apart.append(des[i])
+#         # Prune keypoints that are close together
+#         # And around the middle of the frame
+#         kp_apart = []
+#         des_apart = []
+#         middle = np.array([img.shape[1]//2, img.shape[0]//2])
+#         for i in range(len(kp)):
+#             if self.pruneKP(kp[i], kp_apart, middle):
+#                 kp_apart.append(kp[i])
+#                 des_apart.append(des[i])
 
-        if kpNum <= len(kp_apart):
-            kp = kp_apart[:kpNum]
-            des = des_apart[:kpNum]
-        else:
-            kp = kp_apart
-            des = des_apart
+#         if kpNum <= len(kp_apart):
+#             kp = kp_apart[:kpNum]
+#             des = des_apart[:kpNum]
+#         else:
+#             kp = kp_apart
+#             des = des_apart
 
-        # First frame. Add to empty training set and return blank frame
-        if len(self.getTrainDescriptors('frameByframe')) == 0:
-            self.flannFrameByFrame.add([np.array(des)])
-            self.flannFrameByFrame.train()
+#         # First frame. Add to empty training set and return blank frame
+#         if len(self.getTrainDescriptors('frameByframe')) == 0:
+#             self.flannFrameByFrame.add([np.array(des)])
+#             self.flannFrameByFrame.train()
             
-            if self.enableGlobal:
-                self.flannGlobal.add([np.array(des)])
-                self.flannGlobal.train()
+#             if self.enableGlobal:
+#                 self.flannGlobal.add([np.array(des)])
+#                 self.flannGlobal.train()
 
-            self.prevFrameKP = kp
-            return {'frame': np.zeros(img.shape, dtype='uint8') * 255, 'transform': [None, None, None, None]}
+#             self.prevFrameKP = kp
+#             return {'frame': np.zeros(img.shape, dtype='uint8') * 255, 'transform': [None, None, None, None]}
 
-        # Match the current frame with the previous one
-        matchesFrameByFrame = self.flannFrameByFrame.knnMatch(np.array(des), k=1)
-        matchesFrameByFrame = [x for x in matchesFrameByFrame if x[0].distance < self.match_threshold]
-        # Remove the previous frame's descriptors and add in the current one's to the matcher
-        self.flannFrameByFrame.clear()
-        self.flannFrameByFrame.add([np.array(des)])
-        self.flannFrameByFrame.train()
+#         # Match the current frame with the previous one
+#         matchesFrameByFrame = self.flannFrameByFrame.knnMatch(np.array(des), k=1)
+#         matchesFrameByFrame = [x for x in matchesFrameByFrame if x[0].distance < self.match_threshold]
+#         # Remove the previous frame's descriptors and add in the current one's to the matcher
+#         self.flannFrameByFrame.clear()
+#         self.flannFrameByFrame.add([np.array(des)])
+#         self.flannFrameByFrame.train()
 
-        # Match the current frame with all previous frames and add to the descriptor collection
-        if self.enableGlobal:
-            matchesGlobal = self.flannGlobal.knnMatch(np.array(des), k=1)
-            matchesGlobal = [x for x in matchesGlobal if x[0].distance < self.match_threshold]
-            self.flannGlobal.add([np.array(des)])
-            self.flannGlobal.train()
+#         # Match the current frame with all previous frames and add to the descriptor collection
+#         if self.enableGlobal:
+#             matchesGlobal = self.flannGlobal.knnMatch(np.array(des), k=1)
+#             matchesGlobal = [x for x in matchesGlobal if x[0].distance < self.match_threshold]
+#             self.flannGlobal.add([np.array(des)])
+#             self.flannGlobal.train()
 
-        transform = self.getViewTransform(matchesFrameByFrame, kp, img.shape)
-        self.prevFrameKP = kp
-        outKPFrame = cv2.drawKeypoints(img,kp,img,flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+#         transform = self.getViewTransform(matchesFrameByFrame, kp, img.shape)
+#         self.prevFrameKP = kp
+#         outKPFrame = cv2.drawKeypoints(img,kp,img,flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
         
-        return {'frame': outKPFrame, 'transform': transform}
+#         return {'frame': outKPFrame, 'transform': transform}
 
-'''
-Monocular Depth
-Utilizes the Monodepth2 CNN: https://github.com/nianticlabs/monodepth2
-Creates a depth map from a single frame
-NOTE: Makes use of the variable naming and calling conventions found in the library's predictor script
-'''
-class MonoDepth:
-    # Initialize the predictor
-    def __init__(self, path):
-        if torch.cuda.is_available():
-            self.device = torch.device("cuda")
-        else:
-            self.device = torch.device("cpu")
+# '''
+# Monocular Depth
+# Utilizes the Monodepth2 CNN: https://github.com/nianticlabs/monodepth2
+# Creates a depth map from a single frame
+# NOTE: Makes use of the variable naming and calling conventions found in the library's predictor script
+# '''
+# class MonoDepth:
+#     # Initialize the predictor
+#     def __init__(self, path):
+#         if torch.cuda.is_available():
+#             self.device = torch.device("cuda")
+#         else:
+#             self.device = torch.device("cpu")
         
-        # Load model
-        self.model_path = path
-        self.encoder_path = os.path.join(self.model_path, "encoder.pth")
-        self.depth_decoder_path = os.path.join(self.model_path, "depth.pth")
-        self.encoder = networks.ResnetEncoder(18, False)
-        self.loaded_dict_enc = torch.load(self.encoder_path, map_location=self.device)
+#         # Load model
+#         self.model_path = path
+#         self.encoder_path = os.path.join(self.model_path, "encoder.pth")
+#         self.depth_decoder_path = os.path.join(self.model_path, "depth.pth")
+#         self.encoder = networks.ResnetEncoder(18, False)
+#         self.loaded_dict_enc = torch.load(self.encoder_path, map_location=self.device)
 
-        # Model training paramaters
-        self.feed_height = self.loaded_dict_enc['height']
-        self.feed_width = self.loaded_dict_enc['width']
-        self.filtered_dict_enc = {k: v for k, v in self.loaded_dict_enc.items() if k in self.encoder.state_dict()}
-        self.encoder.load_state_dict(self.filtered_dict_enc)
-        self.encoder.to(self.device)
-        self.encoder.eval()
+#         # Model training paramaters
+#         self.feed_height = self.loaded_dict_enc['height']
+#         self.feed_width = self.loaded_dict_enc['width']
+#         self.filtered_dict_enc = {k: v for k, v in self.loaded_dict_enc.items() if k in self.encoder.state_dict()}
+#         self.encoder.load_state_dict(self.filtered_dict_enc)
+#         self.encoder.to(self.device)
+#         self.encoder.eval()
 
-        self.depth_decoder = networks.DepthDecoder(
-            num_ch_enc=self.encoder.num_ch_enc, scales=range(4))
+#         self.depth_decoder = networks.DepthDecoder(
+#             num_ch_enc=self.encoder.num_ch_enc, scales=range(4))
 
-        self.loaded_dict = torch.load(self.depth_decoder_path, map_location=self.device)
-        self.depth_decoder.load_state_dict(self.loaded_dict)
-        self.depth_decoder.to(self.device)
-        self.depth_decoder.eval()
+#         self.loaded_dict = torch.load(self.depth_decoder_path, map_location=self.device)
+#         self.depth_decoder.load_state_dict(self.loaded_dict)
+#         self.depth_decoder.to(self.device)
+#         self.depth_decoder.eval()
 
-    def estimate(self, img):
-        with torch.no_grad():
-            # Convert cv2 image array to PIL Image
-            img = Image.fromarray(img).convert('RGB')
-            original_width, original_height = img.size
-            img = img.resize((self.feed_width, self.feed_height), pil.LANCZOS)
-            img = transforms.ToTensor()(img).unsqueeze(0)
+#     def estimate(self, img):
+#         with torch.no_grad():
+#             # Convert cv2 image array to PIL Image
+#             img = Image.fromarray(img).convert('RGB')
+#             original_width, original_height = img.size
+#             img = img.resize((self.feed_width, self.feed_height), pil.LANCZOS)
+#             img = transforms.ToTensor()(img).unsqueeze(0)
 
-            # Get prediction
-            img = img.to(self.device)
-            features = self.encoder(img)
-            outputs = self.depth_decoder(features)
-            disp = outputs[("disp", 0)]
-            disp_resized = torch.nn.functional.interpolate(
-                disp, (original_height, original_width), mode="bilinear", align_corners=False)
+#             # Get prediction
+#             img = img.to(self.device)
+#             features = self.encoder(img)
+#             outputs = self.depth_decoder(features)
+#             disp = outputs[("disp", 0)]
+#             disp_resized = torch.nn.functional.interpolate(
+#                 disp, (original_height, original_width), mode="bilinear", align_corners=False)
 
-            # Generate depth map
-            disp_resized_np = disp_resized.squeeze().cpu().numpy()
-            vmax = np.percentile(disp_resized_np, 95)
-            normalizer = mpl.colors.Normalize(vmin=disp_resized_np.min(), vmax=vmax)
-            mapper = cm.ScalarMappable(norm=normalizer, cmap='magma')
-            colormapped_im = (mapper.to_rgba(disp_resized_np)[:, :, :3] * 255).astype(np.uint8)
+#             # Generate depth map
+#             disp_resized_np = disp_resized.squeeze().cpu().numpy()
+#             vmax = np.percentile(disp_resized_np, 95)
+#             normalizer = mpl.colors.Normalize(vmin=disp_resized_np.min(), vmax=vmax)
+#             mapper = cm.ScalarMappable(norm=normalizer, cmap='magma')
+#             colormapped_im = (mapper.to_rgba(disp_resized_np)[:, :, :3] * 255).astype(np.uint8)
 
-            return colormapped_im
+#             return colormapped_im
 
-'''
-Stereo Depth
-Utilizes the HD3 CNN: https://github.com/ucbdrive/hd3
-Creates a depth map from two stereoscopic frames
-NOTE: Currently a work in progress
-NOTE: Makes use of the variable naming and calling conventions found in the library's predictor script
-'''
-class StereoDepth:
-    def __init__(self, model_path):
-        self.corr_range = [4, 4, 4, 4, 4, 4]
-        self.model = models.HD3Model("stereo", "dlaup", "hda", self.corr_range,
-                                False).cuda()
-        self.model = torch.nn.DataParallel(self.model).cuda()
+# '''
+# Stereo Depth
+# Utilizes the HD3 CNN: https://github.com/ucbdrive/hd3
+# Creates a depth map from two stereoscopic frames
+# NOTE: Currently a work in progress
+# NOTE: Makes use of the variable naming and calling conventions found in the library's predictor script
+# '''
+# class StereoDepthCNN:
+#     def __init__(self, model_path):
+#         self.corr_range = [4, 4, 4, 4, 4, 4]
+#         self.model = models.HD3Model("stereo", "dlaup", "hda", self.corr_range,
+#                                 False).cuda()
+#         self.model = torch.nn.DataParallel(self.model).cuda()
         
-        self.checkpoint = torch.load(model_path)
-        self.model.load_state_dict(self.checkpoint['state_dict'], strict=True)
+#         self.checkpoint = torch.load(model_path)
+#         self.model.load_state_dict(self.checkpoint['state_dict'], strict=True)
         
-        self.model.eval()
+#         self.model.eval()
 
-    def get_target_size(self, H, W):
-        h = 64 * np.array([[math.floor(H / 64), math.floor(H / 64) + 1]])
-        w = 64 * np.array([[math.floor(W / 64), math.floor(W / 64) + 1]])
-        ratio = np.abs(np.matmul(np.transpose(h), 1 / w) - H / W)
-        index = np.argmin(ratio)
-        return h[0, index // 2], w[0, index % 2]
+#     def get_target_size(self, H, W):
+#         h = 64 * np.array([[math.floor(H / 64), math.floor(H / 64) + 1]])
+#         w = 64 * np.array([[math.floor(W / 64), math.floor(W / 64) + 1]])
+#         ratio = np.abs(np.matmul(np.transpose(h), 1 / w) - H / W)
+#         index = np.argmin(ratio)
+#         return h[0, index // 2], w[0, index % 2]
 
-    def estimate(self, imgL, imgR):
-        input_size = imgL.shape
+#     def estimate(self, imgL, imgR):
+#         input_size = imgL.shape
 
-        # imgL = Image.fromarray(imgL).convert('RGB')
-        # imgR = Image.fromarray(imgR).convert('RGB')
-        # imgL = Image.fromarray(imgL)
-        # imgR = Image.fromarray(imgR)
-        # print(imgR.size)
+#         # imgL = Image.fromarray(imgL).convert('RGB')
+#         # imgR = Image.fromarray(imgR).convert('RGB')
+#         # imgL = Image.fromarray(imgL)
+#         # imgR = Image.fromarray(imgR)
+#         # print(imgR.size)
 
-        mean = [0.485, 0.456, 0.406]
-        std = [0.229, 0.224, 0.225]
+#         mean = [0.485, 0.456, 0.406]
+#         std = [0.229, 0.224, 0.225]
         
-        th, tw = self.get_target_size(input_size[0], input_size[1])
-        # print(th, tw)
+#         th, tw = self.get_target_size(input_size[0], input_size[1])
+#         # print(th, tw)
         
-        val_transform = transforms.Compose(
-            [transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std)])
+#         val_transform = transforms.Compose(
+#             [transforms.ToTensor(),
+#             transforms.Normalize(mean=mean, std=std)])
         
-        # val_data = datasets.HD3Data(
-        mode="stereo"
-        # data_root=args.data_root,
-        # data_list=args.data_list,
-        label_num=False
-        transform=val_transform
-        out_size=True
-            # )
+#         # val_data = datasets.HD3Data(
+#         mode="stereo"
+#         # data_root=args.data_root,
+#         # data_list=args.data_list,
+#         label_num=False
+#         transform=val_transform
+#         out_size=True
+#             # )
         
-        # val_loader = torch.utils.data.DataLoader(
-        #     val_data,
-        #     batch_size=1,
-        #     shuffle=False,
-        #     num_workers=16,
-        #     pin_memory=True)
+#         # val_loader = torch.utils.data.DataLoader(
+#         #     val_data,
+#         #     batch_size=1,
+#         #     shuffle=False,
+#         #     num_workers=16,
+#         #     pin_memory=True)
 
-        cudnn.enabled = True
-        cudnn.benchmark = True
+#         cudnn.enabled = True
+#         cudnn.benchmark = True
         
-        # imgL = val_transform(imgL, [])
-        # imgR = val_transform(imgR, [])
-        # print(imgL.shape)
-        cur_data = [[imgL, imgR], []]
-        cur_data = list(val_transform(*cur_data))
-        cur_data.append(np.array(input_size[::-1], dtype=int))
-        cur_data = tuple(cur_data)
+#         # imgL = val_transform(imgL, [])
+#         # imgR = val_transform(imgR, [])
+#         # print(imgL.shape)
+#         cur_data = [[imgL, imgR], []]
+#         cur_data = list(val_transform(*cur_data))
+#         cur_data.append(np.array(input_size[::-1], dtype=int))
+#         cur_data = tuple(cur_data)
 
-        # print(cur_data)
-        # imgL_tensor = cur_data[0][0]
-        # print(imgL)
-        # imgR_tensor = cur_data[0][1]
+#         # print(cur_data)
+#         # imgL_tensor = cur_data[0][0]
+#         # print(imgL)
+#         # imgR_tensor = cur_data[0][1]
 
-        with torch.no_grad():
-            # for i, (img_list, label_list, img_size) in enumerate(val_loader):
-                # data_time.update(time.time() - end)
+#         with torch.no_grad():
+#             # for i, (img_list, label_list, img_size) in enumerate(val_loader):
+#                 # data_time.update(time.time() - end)
 
-            img_list, label_list, img_size = cur_data
-            # print(img_list)
-            img_list = [img.unsqueeze(0) for img in img_list]
-            img_size = np.array(input_size[:2][::-1], dtype=int)
-            img_size = img_size[np.newaxis, :]
-            # print(img_size)
-            img_list = [img.to(torch.device("cuda")) for img in img_list]
-            label_list = [
-                label.to(torch.device("cuda")) for label in label_list
-            ]
+#             img_list, label_list, img_size = cur_data
+#             # print(img_list)
+#             img_list = [img.unsqueeze(0) for img in img_list]
+#             img_size = np.array(input_size[:2][::-1], dtype=int)
+#             img_size = img_size[np.newaxis, :]
+#             # print(img_size)
+#             img_list = [img.to(torch.device("cuda")) for img in img_list]
+#             label_list = [
+#                 label.to(torch.device("cuda")) for label in label_list
+#             ]
 
-            # resize test
-            resized_img_list = [
-                F.interpolate(
-                    img, (th, tw), mode='bilinear', align_corners=True)
-                for img in img_list
-            ]
-
-
-
-            # # img_size = np.array(imgL.size, dtype=int).cpu().numpy()
-            # img_size = np.array(imgL.size, dtype=int)
-            # img_list = [imgL_tensor.to(torch.device("cuda")), imgR_tensor.to(torch.device("cuda"))]
-            # label_list = []
-            # print(img_list[0].shape)
-
-            # # resize test
-            # resized_img_list = [
-            #     F.interpolate(
-            #         img, (th, tw), mode='bilinear', align_corners=True)
-            #     for img in img_list
-            # ]
+#             # resize test
+#             resized_img_list = [
+#                 F.interpolate(
+#                     img, (th, tw), mode='bilinear', align_corners=True)
+#                 for img in img_list
+#             ]
 
 
-            output = self.model(
-                img_list=resized_img_list,
-                label_list=label_list,
-                get_vect=True,
-                get_epe=False)
-            scale_factor = 1 / 2**(7 - len(self.corr_range))
-            output['vect'] = resize_dense_vector(output['vect'] * scale_factor,
-                                                img_size[0, 1],
-                                                img_size[0, 0])
+
+#             # # img_size = np.array(imgL.size, dtype=int).cpu().numpy()
+#             # img_size = np.array(imgL.size, dtype=int)
+#             # img_list = [imgL_tensor.to(torch.device("cuda")), imgR_tensor.to(torch.device("cuda"))]
+#             # label_list = []
+#             # print(img_list[0].shape)
+
+#             # # resize test
+#             # resized_img_list = [
+#             #     F.interpolate(
+#             #         img, (th, tw), mode='bilinear', align_corners=True)
+#             #     for img in img_list
+#             # ]
 
 
-            pred_vect = output['vect'].data.cpu().numpy()
-            pred_vect = np.transpose(pred_vect, (0, 2, 3, 1))
-            # curr_bs = pred_vect.shape[0]
-            # assert curr_bs == 1
-
-            # for idx in range(curr_bs):
-                # curr_idx = i * 1 + idx
-            curr_vect = pred_vect[0]
-
-            vis_flo = fl.flow_to_image(fl.disp2flow(curr_vect))
-            vis_flo = cv2.cvtColor(vis_flo, cv2.COLOR_RGB2BGR)
-            return vis_flo
-
-                    # cv2.imwrite(vis_fn, vis_flo)
-
-                    # cv2.imwrite(vect_fn,
-                    #             np.uint16(-curr_vect[:, :, 0] * 256.0))
+#             output = self.model(
+#                 img_list=resized_img_list,
+#                 label_list=label_list,
+#                 get_vect=True,
+#                 get_epe=False)
+#             scale_factor = 1 / 2**(7 - len(self.corr_range))
+#             output['vect'] = resize_dense_vector(output['vect'] * scale_factor,
+#                                                 img_size[0, 1],
+#                                                 img_size[0, 0])
 
 
-'''
-Geometric Projection
-Utilizes the Open3D 3D Processing Library: https://github.com/intel-isl/Open3D
-Creates a point cloud map of the region the agent is located in
-'''
-class GeoProjection():
-    # Initialize an empty point cloud.
-    def __init__(self, mode='offline'):
-        self.mode = mode
-        self.pcd = None
-        self.xyz = np.zeros(3, dtype='float64')
-        self.rot = np.zeros((3,1), dtype='float64')
-        self.vis = None
-        # self.fwd = 0.00005
+#             pred_vect = output['vect'].data.cpu().numpy()
+#             pred_vect = np.transpose(pred_vect, (0, 2, 3, 1))
+#             # curr_bs = pred_vect.shape[0]
+#             # assert curr_bs == 1
 
-        # If using live mode, create the visualizer window.
-        if self.mode == 'online':
-            self.vis = o3d.visualization.Visualizer()
-            # self.vis = o3d.visualization.VisualizerWithKeyCallback()
-            self.vis.create_window()
+#             # for idx in range(curr_bs):
+#                 # curr_idx = i * 1 + idx
+#             curr_vect = pred_vect[0]
+
+#             vis_flo = fl.flow_to_image(fl.disp2flow(curr_vect))
+#             vis_flo = cv2.cvtColor(vis_flo, cv2.COLOR_RGB2BGR)
+#             return vis_flo
+
+#                     # cv2.imwrite(vis_fn, vis_flo)
+
+#                     # cv2.imwrite(vect_fn,
+#                     #             np.uint16(-curr_vect[:, :, 0] * 256.0))
+
+
+# '''
+# Geometric Projection
+# Utilizes the Open3D 3D Processing Library: https://github.com/intel-isl/Open3D
+# Creates a point cloud map of the region the agent is located in
+# '''
+# class GeoProjection():
+#     # Initialize an empty point cloud.
+#     def __init__(self, mode='offline'):
+#         self.mode = mode
+#         self.pcd = None
+#         self.xyz = np.zeros(3, dtype='float64')
+#         self.rot = np.zeros((3,1), dtype='float64')
+#         self.vis = None
+#         # self.fwd = 0.00005
+
+#         # If using live mode, create the visualizer window.
+#         if self.mode == 'online':
+#             self.vis = o3d.visualization.Visualizer()
+#             # self.vis = o3d.visualization.VisualizerWithKeyCallback()
+#             self.vis.create_window()
             
-            # Fix from https://github.com/intel-isl/Open3D/issues/497
-            # self.vis.register_key_callback(ord("C"), self.center_view)
+#             # Fix from https://github.com/intel-isl/Open3D/issues/497
+#             # self.vis.register_key_callback(ord("C"), self.center_view)
     
-    # Fix from https://github.com/intel-isl/Open3D/issues/497
-    def center_view(self, vis):
-        vis.reset_view_point(True)
-        ctr = vis.get_view_control()
-        ctr.rotate(180, 90.0)
+#     # Fix from https://github.com/intel-isl/Open3D/issues/497
+#     def center_view(self, vis):
+#         vis.reset_view_point(True)
+#         ctr = vis.get_view_control()
+#         ctr.rotate(180, 90.0)
 
-    # In live mode, update the visualizer to show the updated point cloud
-    def update(self):
-        self.vis.update_geometry()
-        self.vis.poll_events()
-        self.vis.reset_view_point(True)
-        ctr = self.vis.get_view_control()
-        ctr.rotate(0, 500)
-        self.vis.update_renderer()
-        # time.sleep(5)
+#     # In live mode, update the visualizer to show the updated point cloud
+#     def update(self):
+#         self.vis.update_geometry()
+#         self.vis.poll_events()
+#         self.vis.reset_view_point(True)
+#         ctr = self.vis.get_view_control()
+#         ctr.rotate(0, 500)
+#         self.vis.update_renderer()
+#         # time.sleep(5)
 
-    # DEPRECATED
-    # Returns the rotation matrix for a rotation in the Y axis
-    def rotateY(self, d):
-        return np.array([[np.cos(d), 0, np.sin(d)],
-                         [0, 1, 0], 
-                         [-np.sin(d), 0, np.cos(d)]])
+#     # DEPRECATED
+#     # Returns the rotation matrix for a rotation in the Y axis
+#     def rotateY(self, d):
+#         return np.array([[np.cos(d), 0, np.sin(d)],
+#                          [0, 1, 0], 
+#                          [-np.sin(d), 0, np.cos(d)]])
 
-    # DEPRECATED
-    # Returns the rotation matrix for a rotation in the X axis
-    def rotateX(self, d):
-        return np.array([[1, 0, 0],
-                         [0, np.cos(d), -np.sin(d)], 
-                         [0, np.sin(d), np.cos(d)]])
+#     # DEPRECATED
+#     # Returns the rotation matrix for a rotation in the X axis
+#     def rotateX(self, d):
+#         return np.array([[1, 0, 0],
+#                          [0, np.cos(d), -np.sin(d)], 
+#                          [0, np.sin(d), np.cos(d)]])
 
-    # Move a single frame's point cloud to match it's location in the global map
-    def movePoints(self, pcd, transformID):
-        # vecotor magnitidue from addition of x and y component
-        # TODO: CURRENTLY USING CONSTANT VALUE
-        if True or transformID[2] is None or transformID[3] is None:
-            magnitude = 0.00005
-        else:
-            magnitude = np.hypot(transformID[2], transformID[3]) / 100000
+#     # Move a single frame's point cloud to match it's location in the global map
+#     def movePoints(self, pcd, transformID):
+#         # vecotor magnitidue from addition of x and y component
+#         # TODO: CURRENTLY USING CONSTANT VALUE
+#         if True or transformID[2] is None or transformID[3] is None:
+#             magnitude = 0.00005
+#         else:
+#             magnitude = np.hypot(transformID[2], transformID[3]) / 100000
 
-        # Forward
-        if transformID[0] == 'f':
-            # Forward movement is mapped to the X-Z plane based on the vector angle of the current rotation
-            #   ^                       |
-            #   |                       |   
-            #   |       <------         |           ------->
-            #   | 0d            90d     v 180d               270d
-            self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
-        # Rotate right (Y axis)
-        if transformID[1] == 'r':
-            self.rot += np.array([0,0.032,0]).reshape(3,1)
-            self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
-        # Rotate left (Y axis)
-        elif transformID[1] == 'l':
-            self.rot += np.array([0,-0.032,0]).reshape(3,1)
-            self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
-        # Rotate up (X axis)
-        elif transformID[1] == 'u':
-            self.rot += np.array([-0.032,0,0]).reshape(3,1)
-        # Rotate down (X axis)
-        elif transformID[1] == 'd':
-            self.rot += np.array([0.032,0,0]).reshape(3,1)
+#         # Forward
+#         if transformID[0] == 'f':
+#             # Forward movement is mapped to the X-Z plane based on the vector angle of the current rotation
+#             #   ^                       |
+#             #   |                       |   
+#             #   |       <------         |           ------->
+#             #   | 0d            90d     v 180d               270d
+#             self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
+#         # Rotate right (Y axis)
+#         if transformID[1] == 'r':
+#             self.rot += np.array([0,0.032,0]).reshape(3,1)
+#             self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
+#         # Rotate left (Y axis)
+#         elif transformID[1] == 'l':
+#             self.rot += np.array([0,-0.032,0]).reshape(3,1)
+#             self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
+#         # Rotate up (X axis)
+#         elif transformID[1] == 'u':
+#             self.rot += np.array([-0.032,0,0]).reshape(3,1)
+#         # Rotate down (X axis)
+#         elif transformID[1] == 'd':
+#             self.rot += np.array([0.032,0,0]).reshape(3,1)
 
-        # Apply transformation
-        cur_pcd = pcd.translate(self.xyz)
-        cur_pcd = pcd.rotate(self.rot)
-        return cur_pcd
+#         # Apply transformation
+#         cur_pcd = pcd.translate(self.xyz)
+#         cur_pcd = pcd.rotate(self.rot)
+#         return cur_pcd
 
-    # Add the point cloud from the current frame to the global point cloud of the map
-    def estimate(self, img_colour, img_depth, transformID, crop_fact_h=0.8, crop_fact_w=0.7, downsample=20):
-        img_colour = cv2.cvtColor(img_colour, cv2.COLOR_BGR2RGB)
+#     # Add the point cloud from the current frame to the global point cloud of the map
+#     def estimate(self, img_colour, img_depth, transformID, crop_fact_h=0.8, crop_fact_w=0.7, downsample=20):
+#         img_colour = cv2.cvtColor(img_colour, cv2.COLOR_BGR2RGB)
 
-        # Crop the frame to reduce boundary depth noise
-        h, w = img_colour.shape[:2]
-        crop_h = int((h - (crop_fact_h*h)) / 2)
-        crop_w = int((w - (crop_fact_w*w)) / 2)
+#         # Crop the frame to reduce boundary depth noise
+#         h, w = img_colour.shape[:2]
+#         crop_h = int((h - (crop_fact_h*h)) / 2)
+#         crop_w = int((w - (crop_fact_w*w)) / 2)
         
-        # Convert the cv2 frames to the Open3D image format
-        img_colour = copy.deepcopy(img_colour[crop_h:h-crop_h, crop_w:w-crop_w, :])
-        img_od3_colour = o3d.geometry.Image(img_colour)
-        img_depth = copy.deepcopy(img_depth[crop_h:h-crop_h, crop_w:w-crop_w, :])
-        img_od3_depth = o3d.geometry.Image(img_depth)
+#         # Convert the cv2 frames to the Open3D image format
+#         img_colour = copy.deepcopy(img_colour[crop_h:h-crop_h, crop_w:w-crop_w, :])
+#         img_od3_colour = o3d.geometry.Image(img_colour)
+#         img_depth = copy.deepcopy(img_depth[crop_h:h-crop_h, crop_w:w-crop_w, :])
+#         img_od3_depth = o3d.geometry.Image(img_depth)
         
-        # Create a point cloud from the current frame and transform it so it is right side up
-        rgbd_img = o3d.geometry.RGBDImage.create_from_color_and_depth(img_od3_colour, img_od3_depth, convert_rgb_to_intensity=False)
-        cur_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
-            rgbd_img,
-            o3d.camera.PinholeCameraIntrinsic(
-                o3d.camera.PinholeCameraIntrinsicParameters.PrimeSenseDefault))
-        cur_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+#         # Create a point cloud from the current frame and transform it so it is right side up
+#         rgbd_img = o3d.geometry.RGBDImage.create_from_color_and_depth(img_od3_colour, img_od3_depth, convert_rgb_to_intensity=False)
+#         cur_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
+#             rgbd_img,
+#             o3d.camera.PinholeCameraIntrinsic(
+#                 o3d.camera.PinholeCameraIntrinsicParameters.PrimeSenseDefault))
+#         cur_pcd.transform([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
 
-        # Downsample the number of points to reduce output size and rendering computation
-        cur_pcd = cur_pcd.uniform_down_sample(downsample)
+#         # Downsample the number of points to reduce output size and rendering computation
+#         cur_pcd = cur_pcd.uniform_down_sample(downsample)
         
-        # Cut a square in the point cloud to make a path viewable when the point cloud is rendered
-        #   _______________
-        #   |   X X X X   |
-        #   |   X X X X   |
-        #   |   X X X X   |
-        #   |             |  
-        #   --------------- where X represensts the cut region
-        pcd_array = np.asarray(cur_pcd.points)
-        pcd_cent = cur_pcd.get_center()
-        pcd_max = cur_pcd.get_max_bound()
-        pcd_min = cur_pcd.get_min_bound()
-        x_thresh = (pcd_max[0] - pcd_cent[0]) / 2
-        y_thresh = (pcd_max[1] - pcd_cent[1]) / 2
-        xxR = np.where(pcd_array[:,0] > pcd_cent[0] + x_thresh)
-        xxL = np.where(pcd_array[:,0] < pcd_cent[0] - x_thresh)
-        yy = np.where(pcd_array[:,1] < pcd_cent[1] - y_thresh)
-        uu = np.unique(np.append(np.append(xxR[0], xxL[0]), yy[0]))
-        cur_pcd = cur_pcd.select_down_sample(uu, invert=False)
+#         # Cut a square in the point cloud to make a path viewable when the point cloud is rendered
+#         #   _______________
+#         #   |   X X X X   |
+#         #   |   X X X X   |
+#         #   |   X X X X   |
+#         #   |             |  
+#         #   --------------- where X represensts the cut region
+#         pcd_array = np.asarray(cur_pcd.points)
+#         pcd_cent = cur_pcd.get_center()
+#         pcd_max = cur_pcd.get_max_bound()
+#         pcd_min = cur_pcd.get_min_bound()
+#         x_thresh = (pcd_max[0] - pcd_cent[0]) / 2
+#         y_thresh = (pcd_max[1] - pcd_cent[1]) / 2
+#         xxR = np.where(pcd_array[:,0] > pcd_cent[0] + x_thresh)
+#         xxL = np.where(pcd_array[:,0] < pcd_cent[0] - x_thresh)
+#         yy = np.where(pcd_array[:,1] < pcd_cent[1] - y_thresh)
+#         uu = np.unique(np.append(np.append(xxR[0], xxL[0]), yy[0]))
+#         cur_pcd = cur_pcd.select_down_sample(uu, invert=False)
 
-        # Based on camera movement, adjust the placement of the point cloud in the global map
-        cur_pcd = self.movePoints(cur_pcd, transformID)
+#         # Based on camera movement, adjust the placement of the point cloud in the global map
+#         cur_pcd = self.movePoints(cur_pcd, transformID)
         
-        # Add the point cloud to the global map
-        if self.pcd == None:
-            self.pcd = copy.deepcopy(cur_pcd)
-            if self.mode == 'online':
-                self.vis.add_geometry(self.pcd)
-                # ctr = self.vis.get_view_control()
-                # ctr.change_field_of_view(step=90.0)
-                # self.vis.run()
-                # self.vis.destroy_window()
-        else:
-            self.pcd += cur_pcd
+#         # Add the point cloud to the global map
+#         if self.pcd == None:
+#             self.pcd = copy.deepcopy(cur_pcd)
+#             if self.mode == 'online':
+#                 self.vis.add_geometry(self.pcd)
+#                 # ctr = self.vis.get_view_control()
+#                 # ctr.change_field_of_view(step=90.0)
+#                 # self.vis.run()
+#                 # self.vis.destroy_window()
+#         else:
+#             self.pcd += cur_pcd
 
-        # Render the current global map
-        if self.mode == 'online':
-            self.update()
+#         # Render the current global map
+#         if self.mode == 'online':
+#             self.update()
         
-        outFramePCD = cv2.cvtColor(cv2.normalize(np.asarray(
-                                                    self.vis.capture_screen_float_buffer(True)),
-                                                    None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1), cv2.COLOR_RGB2BGR)
+#         outFramePCD = cv2.cvtColor(cv2.normalize(np.asarray(
+#                                                     self.vis.capture_screen_float_buffer(True)),
+#                                                     None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1), cv2.COLOR_RGB2BGR)
 
-        return [self.pcd, outFramePCD]
+#         return [self.pcd, outFramePCD]
 
-'''
-Object Detection
-Utilizes Facebook AI Research's Detectron2 CNN: https://github.com/facebookresearch/detectron2
-Performs frame by frame object detection and segmentation
-NOTE: Makes use of the variable naming and calling conventions found in the library's predictor script
-'''
-class ObjectDetect:
-    # Initialize the predictor
-    def __init__(self, model_yaml, weights):
-        self.cfg = get_cfg()
-        self.cfg.merge_from_file(model_yaml)
-        self.cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
-        self.cfg.MODEL.WEIGHTS = weights
-        self.predictor = DefaultPredictor(self.cfg)
+# '''
+# Object Detection
+# Utilizes Facebook AI Research's Detectron2 CNN: https://github.com/facebookresearch/detectron2
+# Performs frame by frame object detection and segmentation
+# NOTE: Makes use of the variable naming and calling conventions found in the library's predictor script
+# '''
+# class ObjectDetect:
+#     # Initialize the predictor
+#     def __init__(self, model_yaml, weights):
+#         self.cfg = get_cfg()
+#         self.cfg.merge_from_file(model_yaml)
+#         self.cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
+#         self.cfg.MODEL.WEIGHTS = weights
+#         self.predictor = DefaultPredictor(self.cfg)
     
-    # Feed in an image frame to the predictor and return the output
-    def estimate(self, img):
-        outputs = self.predictor(img)
-        v = Visualizer(img[:, :, ::-1], MetadataCatalog.get(self.cfg.DATASETS.TRAIN[0]), scale=1.0)
-        v = v.draw_instance_predictions(outputs["instances"].to("cpu"))
-        return v.get_image()[:, :, ::-1]
+#     # Feed in an image frame to the predictor and return the output
+#     def estimate(self, img):
+#         outputs = self.predictor(img)
+#         v = Visualizer(img[:, :, ::-1], MetadataCatalog.get(self.cfg.DATASETS.TRAIN[0]), scale=1.0)
+#         v = v.draw_instance_predictions(outputs["instances"].to("cpu"))
+#         return v.get_image()[:, :, ::-1]
     
-    # Return the current CfgNode
-    def getCFG(self):
-        return self.cfg
+#     # Return the current CfgNode
+#     def getCFG(self):
+#         return self.cfg
 
 
 ############################
@@ -903,7 +909,7 @@ def mslam():
     # Initialize modules
     mod_object_detection = None
     mod_mono_depth = None
-    mod_stereo_depth = None
+    mod_stereo_depth_cnn = None
     mod_agent_locate = None
     mod_geo_projection = None
 
@@ -916,8 +922,8 @@ def mslam():
             settingsModules['object_detection']['model_weights'])
     if enableModules['mono_depth']:
         mod_mono_depth = MonoDepth(settingsModules['mono_depth']['model_path'])
-    if enableModules['stereo_depth']:
-        mod_stereo_depth = StereoDepth(settingsModules['stereo_depth']['model_path'])
+    if enableModules['stereo_depth_cnn']:
+        mod_stereo_depth_cnn = StereoDepthCNN(settingsModules['stereo_depth_cnn']['model_path'])
     if enableModules['agent_locate']:
         mod_agent_locate = AgentLocate(debugging=debugging)
     if enableModules['geo_projection']:
@@ -939,7 +945,7 @@ def mslam():
         outputFrame['original_L'] = frame.copy()
         
         # Get next frame for right camera
-        if enableModules['stereo_depth']:
+        if enableModules['stereo_depth_cnn']:
             isValid, frame2 = vs2.read()
             if not isValid:
                 break
@@ -947,8 +953,8 @@ def mslam():
 
         if enableModules['mono_depth']:
             outputFrame['mono_depth'] = mod_mono_depth.estimate(frame.copy())
-        if enableModules['stereo_depth']:
-            outputFrame['stereo_depth'] = mod_stereo_depth.estimate(frame.copy())
+        if enableModules['stereo_depth_cnn']:
+            outputFrame['stereo_depth_cnn'] = mod_stereo_depth_cnn.estimate(frame.copy())
         if enableModules['agent_locate']:
             out_agent_locate = mod_agent_locate.estimate(frame.copy())
             outputFrame['agent_locate'] = out_agent_locate['frame']
@@ -995,7 +1001,7 @@ def writeFrame(frameNum):
 outputFrame = {
     'object_detection': None,
     'mono_depth': None,
-    'stereo_depth': None,
+    'stereo_depth_cnn': None,
     'agent_locate': None,
     'geo_projection': None,
     'geo_projection_pcd': None,
@@ -1035,7 +1041,7 @@ live_stream = True
 # Enable or disable the modules for debugging. For a complete slam system, enable all* (*choose one of mono or stereo depth).
 enableModules = {
     'object_detection': True,
-    'stereo_depth': False,
+    'stereo_depth_cnn': False,
     'agent_locate': True,
     'mono_depth': True,
     'geo_projection': True,     # depends on depth and agent_locate
@@ -1047,7 +1053,7 @@ settingsModules = {
         'model_path': "detectron2_repo/configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml",
         'model_weights': "detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl",
         },
-    'stereo_depth': {
+    'stereo_depth_cnn': {
         'model_path': "hd3_repo/scripts/model_zoo/hd3s_things_kitti-1243813e.pth",
         },
     'agent_locate': {},
@@ -1135,9 +1141,9 @@ if live_stream:
         return Response(generateStreamFrame('mono_depth'),
             mimetype = "multipart/x-mixed-replace; boundary=frame")
 
-    @app.route("/multislam_stream_stereo_depth")
-    def stream_stereo_depth():
-        return Response(generateStreamFrame('stereo_depth'),
+    @app.route("/multislam_stream_stereo_depth_cnn")
+    def stream_stereo_depth_cnn():
+        return Response(generateStreamFrame('stereo_depth_cnn'),
             mimetype = "multipart/x-mixed-replace; boundary=frame")
 
     @app.route("/multislam_stream_agent_locate")

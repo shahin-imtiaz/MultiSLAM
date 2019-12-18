@@ -12,32 +12,28 @@ from detectron2.utils.visualizer import Visualizer
 from detectron2.data import MetadataCatalog
 import pprint
 
-# setup_logger()
-# pp = pprint.PrettyPrinter(indent=2)
-
+'''
+Object Detection
+Utilizes Facebook AI Research's Detectron2 CNN: https://github.com/facebookresearch/detectron2
+Performs frame by frame object detection and segmentation
+NOTE: Makes use of the variable naming and calling conventions found in the library's predictor script
+'''
 class ObjectDetect:
-    def __init__(self, model_yaml):
+    # Initialize the predictor
+    def __init__(self, model_yaml, weights):
         self.cfg = get_cfg()
         self.cfg.merge_from_file(model_yaml)
         self.cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
-        self.cfg.MODEL.WEIGHTS = "detectron2://COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x/137849600/model_final_f10217.pkl"
+        self.cfg.MODEL.WEIGHTS = weights
         self.predictor = DefaultPredictor(self.cfg)
     
+    # Feed in an image frame to the predictor and return the output
     def estimate(self, img):
         outputs = self.predictor(img)
         v = Visualizer(img[:, :, ::-1], MetadataCatalog.get(self.cfg.DATASETS.TRAIN[0]), scale=1.0)
         v = v.draw_instance_predictions(outputs["instances"].to("cpu"))
         return v.get_image()[:, :, ::-1]
     
+    # Return the current CfgNode
     def getCFG(self):
         return self.cfg
-        
-
-if __name__ == "__main__":
-    od = ObjectDetect("../../detectron2_repo/configs/COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml")
-    od.getCFG
-    im = cv2.imread("input1.jpg")
-    cv2.imwrite("out.jpg", od.detect(im))
-    # pp.pprint(dir(models))
-
-

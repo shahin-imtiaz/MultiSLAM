@@ -1,7 +1,8 @@
 from __future__ import absolute_import, division, print_function
 
 import sys
-sys.path.insert(1, '/home/userm/myGithub/MultiSLAM/hd3_repo')
+sys.path.insert(1, '../../hd3_repo')
+sys.path.insert(1, '../../hd3_repo/utils')
 
 import os
 from os.path import join
@@ -21,14 +22,28 @@ import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
 
-import data.hd3data as datasets
-import data.flowtransforms as transforms
-import hd3model as models
-from utils.utils import *
-from models.hd3_ops import *
-import utils.flowlib as fl
+# import data.hd3data as datasets
+# import data.flowtransforms as transforms
+# import hd3model as models
+# from utils.utils import *
+# from models.hd3_ops import *
+# import utils.flowlib as fl
 
-class StereoDepth:
+import hd3_repo.data.hd3data as datasets
+import hd3_repo.data.flowtransforms as transforms
+import hd3_repo.hd3model as models
+from hd3_repo.utils.utils import *
+from hd3_repo.models.hd3_ops import *
+import hd3_repo.utils.flowlib as fl
+
+'''
+Stereo Depth
+Utilizes the HD3 CNN: https://github.com/ucbdrive/hd3
+Creates a depth map from two stereoscopic frames
+NOTE: Currently a work in progress
+NOTE: Makes use of the variable naming and calling conventions found in the library's predictor script
+'''
+class StereoDepthCNN:
     def __init__(self, model_path):
         self.corr_range = [4, 4, 4, 4, 4, 4]
         self.model = models.HD3Model("stereo", "dlaup", "hda", self.corr_range,
@@ -164,11 +179,3 @@ class StereoDepth:
 
                     # cv2.imwrite(vect_fn,
                     #             np.uint16(-curr_vect[:, :, 0] * 256.0))
-
-       
-
-if __name__ == '__main__':
-    sd = StereoDepth("../../hd3_repo/scripts/model_zoo/hd3s_things_kitti-1243813e.pth")
-    imL = cv2.imread("imgL.png")
-    imR = cv2.imread("imgR.png")
-    cv2.imwrite("outStereo.png", sd.estimate(imL, imR))
