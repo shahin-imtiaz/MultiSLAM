@@ -57,17 +57,18 @@ class AgentLocate:
 
         self.flann.add([np.array(des)])
         self.flann.train()
-        return (kp, matches)
-        # return cv2.drawKeypoints(img,kp,img,flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+        # return (kp, matches)
+        return cv2.drawKeypoints(img,kp,img,flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
 
 if __name__ == "__main__":
     pc = AgentLocate()
-    img1 = cv2.imread("input1.jpg")
-    img2 = cv2.imread("input2.png")
+    # img1 = cv2.imread("input1.jpg")
+    # img2 = cv2.imread("input2.png")
 
-    imgL = cv2.imread("imgL.png")
-    imgR = cv2.imread("imgR.png")
+    # imgL = cv2.imread("imgL.png")
+    # imgR = cv2.imread("imgR.png")
+
     # cv2.imwrite("out1.png", pc.estimate(img1.copy()))
     # cv2.imwrite("out2.png", pc.estimate(img1.copy()))
     # zkp1, zm1 = pc.estimate(img1.copy())
@@ -75,6 +76,9 @@ if __name__ == "__main__":
     # cv2.imwrite("out.png", cv2.drawMatchesKnn(img1,zkp1,img1,zkp2,zm2,None))
     # pc.estimate(img1.copy())
     # pc.estimate(img2.copy())
-    zkp1, zm1 = pc.estimate(imgL.copy())
-    zkp2, zm2 = pc.estimate(imgR.copy())
-    cv2.imwrite("out.png", cv2.drawMatchesKnn(imgR,zkp2,imgL,zkp1,zm2,None))
+    # zkp1, zm1 = pc.estimate(imgL.copy())
+    # zkp2, zm2 = pc.estimate(imgR.copy())
+    # cv2.imwrite("out.png", cv2.drawMatchesKnn(imgR,zkp2,imgL,zkp1,zm2,None))
+
+    img1 = cv2.imread("input.jpg")
+    cv2.imwrite("out.png", pc.estimate(img1))
