@@ -14,7 +14,6 @@ python3 -m pip install -U 'git+https://github.com/cocodataset/cocoapi.git#subdir
 python3 -m pip install -e detectron2_repo
 python3 -m pip install -U "git+https://github.com/cocodataset/panopticapi.git"
 python3 -m pip install -U "git+https://github.com/lvis-dataset/lvis-api.git"
-python3 -m pip install -U "pip install git+https://github.com/mcordts/cityscapesScripts.git"
 python3 -m pip install -U "git+https://github.com/mcordts/cityscapesScripts.git"
 python3 -m pip install -r requirements.pip
 cd monodepth2_repo && python3 test_simple.py --image_path assets/test_image.jpg --model_name mono_1024x320
