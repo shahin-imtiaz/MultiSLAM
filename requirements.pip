@@ -9,7 +9,6 @@ chardet==3.0.4
 cityscapesScripts==1.1.0
 Click==7.0
 cloudpickle==1.2.2
-cupy==6.5.0
 cycler==0.10.0
 Cython==0.29.12
 decorator==4.4.1
@@ -17,7 +16,6 @@ defusedxml==0.6.0
 entrypoints==0.3
 fastrlock==0.4
 Flask==1.1.1
-fvcore==0.1
 google-auth==1.7.1
 google-auth-oauthlib==0.4.1
 grpcio==1.25.0
@@ -56,7 +54,6 @@ oauthlib==3.1.0
 open3d==0.8.0.0
 opencv-contrib-python==3.4.2.17
 pandocfilters==1.4.2
-panopticapi==0.1
 parso==0.5.1
 pexpect==4.7.0
 pickleshare==0.7.5
