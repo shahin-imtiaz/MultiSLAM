@@ -1,7 +1,14 @@
 # MultiSLAM
 Enhanced Real-Time Multi-Camera SLAM for 3D Scene Reconstruction
+By: Mansoor Saqib & Shahin Imtiaz
+For: University of Toronto CSC420 - Intro to Image Understanding Fall 2019
 
-## Dev environment setup
+## Running on CDF
+
+> $ bash mslam_setup_cdf.sh
+> $ python3 mslam.py
+
+## Personal Dev Environment Setup
 >   $ sudo apt-get install python-dev python3-dev
 >
 >   $ python3 -m venv env-mslam
@@ -18,16 +25,15 @@ Enhanced Real-Time Multi-Camera SLAM for 3D Scene Reconstruction
 >
 >   (env-mslam) $ python3 -m pip install -e detectron2_repo
 
-
-
 ## Package contents
 * [mslam/main.py](mslam/main.py): Entrypoint to run MultiSLAM
 * [mslam/agent_loc](mslam/agent_loc):
-    - [agent_loc.py](mslam/agent_loc/agent_loc.py): Locates the agent in 3d space in the scene
+    - [agent_loc.py](mslam/agent_loc/agent_loc.py): Determine agent movement in 3D space
 * [mslam/depth](mslam/depth):
-    - [depth.py](mslam/depth/depth.py): Compute depth information from a single or a set of images
+    - [mono.py](mslam/depth/depth.py): Compute mono depth information from a single image
+    - [stereo_cnn.py](mslam/depth/depth.py): Compute stereo depth information from a two images
 * [mslam/geo_proj](mslam/geo_proj):
-    - [geo_proj.py](mslam/geo_proj/geo_proj.py): Recreate the scene in a 3d mesh
+    - [geo_proj.py](mslam/geo_proj/geo_proj.py): Construct the scene point cloud and track agent location
 * [mslam/img_stitch](mslam/img_stitch):
     - [img_stitch.py](mslam/img_stitch/img_stich.py): Stitch together a set of images
 * [mslam/obj_rec](mslam/obj_rec):

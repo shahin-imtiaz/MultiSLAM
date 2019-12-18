@@ -14,7 +14,6 @@ cycler==0.10.0
 Cython==0.29.12
 decorator==4.4.1
 defusedxml==0.6.0
--e git+https://github.com/facebookresearch/detectron2@5d098717a063507d80d8f80de44f61f91b97c91b#egg=detectron2
 entrypoints==0.3
 fastrlock==0.4
 Flask==1.1.1
@@ -56,14 +55,12 @@ numpy==1.16.4
 oauthlib==3.1.0
 open3d==0.8.0.0
 opencv-contrib-python==3.4.2.17
-opencv-python==3.4.2.17
 pandocfilters==1.4.2
 panopticapi==0.1
 parso==0.5.1
 pexpect==4.7.0
 pickleshare==0.7.5
 Pillow==6.2.1
-pkg-resources==0.0.0
 portalocker==1.5.2
 prometheus-client==0.7.1
 prompt-toolkit==3.0.2
