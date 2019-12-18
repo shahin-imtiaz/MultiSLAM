@@ -1,3 +1,10 @@
+'''
+Opens the given Open3D point cloud file (usually with a .pcd extension) in a visualizer window
+
+Flags:
+-i, --input     Path to the point cloud file
+'''
+
 import argparse
 import open3d as o3d
 

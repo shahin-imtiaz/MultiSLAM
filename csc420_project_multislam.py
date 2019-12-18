@@ -342,21 +342,24 @@ class AgentLocate:
             if qx in [0, 3]:
                 y_magnitude.append(abs(y_diff))
 
-            if x_diff < 0:
-                quads_x[qy, qx] -= 1
-            else:
-                quads_x[qy, qx] += 1
+            quads_x[qy, qx] += x_diff
+            quads_y[qy, qx] += y_diff
+
+            # if x_diff < 0:
+            #     quads_x[qy, qx] -= 1
+            # else:
+            #     quads_x[qy, qx] += 1
             
-            if y_diff < 0:
-                quads_y[qy, qx] -= 1
-            else:
-                quads_y[qy, qx] += 1
+            # if y_diff < 0:
+            #     quads_y[qy, qx] -= 1
+            # else:
+            #     quads_y[qy, qx] += 1
 
         # Calculate the overall numerical sign of each quadrant
-        quads_x = np.where(quads_x < 0, -1, quads_x)
-        quads_x = np.where(quads_x > 0, 1, quads_x)
-        quads_y = np.where(quads_y < 0, -1, quads_y)
-        quads_y = np.where(quads_y > 0, 1, quads_y)
+        # quads_x = np.where(quads_x < 0, -1, quads_x)
+        # quads_x = np.where(quads_x > 0, 1, quads_x)
+        # quads_y = np.where(quads_y < 0, -1, quads_y)
+        # quads_y = np.where(quads_y > 0, 1, quads_y)
 
         # Transformation logic:
         # Move in the forward direction iff all conditions are met:
@@ -393,13 +396,14 @@ class AgentLocate:
         
         # x_sum = stats.mode([quads_x[0,0], quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[0,1], quads_x[0,2], quads_x[0,3], quads_x[1,3], quads_x[2,3], quads_x[3,3]])[0][0]
         # x_sum = np.median([quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[1,3], quads_x[2,3], quads_x[3,3]])
-        x_sum = np.median(quads_x)
+        # x_sum = np.median(quads_x)
+        x_sum = np.average(quads_x)
         print('xsum is:', x_sum)
-        if (x_sum < 0):
+        if (x_sum < -8):
             # if self.debugging:
             #     print('Rotate Right', x_sum)
             mov[1] = 'r'
-        elif (x_sum > 0):
+        elif (x_sum > 8):
             # if self.debugging:
             #     print('Rotate Left', x_sum)
             mov[1] = 'l'
@@ -988,8 +992,8 @@ args = {
     # 'leftcam': 'video/speed_walk_trim2.mp4', # Path to left camera video or mono video
     # 'leftcam': 'video/model_train_track_trim.mp4',
     # 'leftcam': 'video/car_racetrack_480p.mp4',
-    'leftcam': 'video/driving_country_480p_trimmed.mp4',
-    # 'leftcam': 'video/driving_city_480p.mp4',
+    # 'leftcam': 'video/driving_country_480p_trimmed.mp4',
+    'leftcam': 'video/driving_city_480p.mp4',
     # 'leftcam': 'video/tokyo_train_360p.mp4',
     'rightcam': None,               # Path to right camera video if stereo is enabled
     'output': 'OUTPUT/',            # Path to rendering output

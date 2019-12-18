@@ -25,7 +25,7 @@ enableModules = {
     'stereo_depth': False,
     'agent_locate': False,
     'mono_depth': True,     # <----
-    'geo_projection': False, # -----^ dependency
+    'geo_projection': True, # -----^ dependency
 }
 
 outputFrame = {

@@ -14,16 +14,18 @@ import imutils
 import time
 import cv2
 from tqdm import tqdm
+import numpy as np
+import open3d as o3d
 
-debugging = True
+debugging = False
 length = 0
 
 enableModules = {
     'object_detection': True,
     'stereo_depth': False,
     'agent_locate': False,
-    'mono_depth': False,     # <----
-    'geo_projection': False, # -----^ dependency
+    'mono_depth': True,         # <----
+    'geo_projection': False,     # -----^ dependency
 }
 
 outputFrame = {
@@ -61,7 +63,7 @@ def mslam():
     if enableModules['agent_locate']:
         mod_agent_locate = AgentLocate()
     if enableModules['geo_projection']:
-        mod_geo_projection = GeoProjection()
+        mod_geo_projection = GeoProjection(mode='offline')
 
     if debugging:
         print("Done initializing modules")
@@ -86,8 +88,8 @@ def mslam():
         if enableModules['object_detection']:
             outputFrame['object_detection'] = mod_object_detection.estimate(frame.copy())
         if enableModules['geo_projection']:
-            mod_geo_projection.estimate(frame.copy(), outputFrame['mono_depth'].copy(), downsample=1000)
-        
+            outputFrame['geo_projection'] = mod_geo_projection.estimate(frame.copy(), outputFrame['mono_depth'].copy(), downsample=1000)
+        #print(hash(np.sum(outputFrame['object_detection'])))
         writeFrame(i)
 
 def writeFrame(frameNum):
@@ -98,8 +100,14 @@ def writeFrame(frameNum):
         if not enableModules[m] or outputFrame[m] is None:
             continue
 
+        if m == 'geo_projection':
+            o3d.io.write_point_cloud(outputWriter[m], outputFrame['geo_projection'])
+            continue
+
         if debugging:
             print("writing frame", frameNum, "for", m)
+            print("frame stats: ", np.max(outputFrame[m]), np.min(outputFrame[m]), outputFrame[m].shape)
+
         outputWriter[m].write(outputFrame[m])
 
 # NOTE: No stream for geo_projection as it is rendered in the Open3D visualizer
@@ -117,16 +125,6 @@ if __name__ == '__main__':
     vs = cv2.VideoCapture(args["leftcam"])
     if args["rightcam"] is not None:
         vs2 = cv2.VideoCapture(args["rightcam"])
-
-    # # Get frame size
-    # isValid, frame = vs.read()
-    # if not isValid: # No more frames
-    #     exit(1)
-    # # Sync with right camera
-    # if enableModules['stereo_depth']:
-    #     isValid, frame2 = vs2.read()
-    #     if not isValid:
-    #         exit(1)
     
     # Get video stats
     length = int(vs.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -138,20 +136,19 @@ if __name__ == '__main__':
 
     # Ouput format
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+
+    # Output writers
     for m in enableModules.keys():
         if enableModules[m]:
-            outputWriter[m] = cv2.VideoWriter(args["output"]+'OUT_' + m +'.mp4',fourcc,30,(width,height))
-    #         'object_detection': 
-    #         'mono_depth': cv2.VideoWriter(args["output"]+'OUT_mono_depth.mp4',-1,30,(width,height)),
-    #         'agent_locate': cv2.VideoWriter(args["output"]+'OUT_agent_locate.mp4',-1,30,(width,height)),
-    #     }
-
-    # if enableModules['stereo_depth']:
-    #     outputWriter['stereo_depth'] = cv2.VideoWriter(args["output"]+'OUT_stereo_depth.mp4',-1,30,(width,height))
+            if m is 'geo_projection':
+                outputWriter[m] = args["output"]+'OUT_' + m +'.pcd'
+            else:
+                outputWriter[m] = cv2.VideoWriter(args["output"]+'OUT_' + m +'.mp4',fourcc,30,(width,height))
 
     # Single threaded multislam
     t = threading.Thread(target=mslam)
     t.daemon = True
     t.start()
     
+    # Wait for thread to finish
     t.join()
