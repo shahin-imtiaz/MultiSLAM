@@ -1,6 +1,7 @@
-# Makes use of https://github.com/facebookresearch/detectron2/
-# Detectron2 Tutorial (colab):
-#    https://colab.research.google.com/drive/16jcaJoc6bCFAQ96jDe2HwtXj7BMD_-m5#scrollTo=HUjkwRsOn1O0
+# Based on Facebook AI Research's Detectron2
+# https://github.com/facebookresearch/detectron2/
+# Using the official Detectron2 Tutorial (colab):
+# https://colab.research.google.com/drive/16jcaJoc6bCFAQ96jDe2HwtXj7BMD_-m5#scrollTo=HUjkwRsOn1O0
 
 import torch, torchvision
 import cv2

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "Installing mslam"
+echo "Installing mslam. This computer must have CUDA enabled support"
 export CUDA_HOME='/usr/local/cuda-10.0/'
 python3 -m venv env-mslam
 source env-mslam/bin/activate

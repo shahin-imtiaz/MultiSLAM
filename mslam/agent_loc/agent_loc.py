@@ -1,3 +1,8 @@
+# Based on the OpenCV SIFT and Flann Matcher libraries
+# https://docs.opencv.org/3.4/da/df5/tutorial_py_sift_intro.html
+# https://docs.opencv.org/3.4/d5/d6f/tutorial_feature_flann_matcher.html
+#
+# Customized using our own pruning, and agent movement detection and smoothing algorithms
 import cv2
 import numpy as np
 
@@ -63,6 +68,8 @@ class AgentLocate:
                 return False
         return True
 
+    # Smooth motion over the last self.smooth_history number of historical movements
+    # by taking the most common value among them
     def smoothMove(self, mov):
         if len(self.smooth_translate) < self.smooth_history:
             self.smooth_translate.append(mov[0])
@@ -98,7 +105,6 @@ class AgentLocate:
             else:
                 print(out, 'mag=', np.hypot(out[2], out[3]))
         return out
-        
 
     # Return the camera translation and rotation matrix for the movement between frames
     def getViewTransform(self, matches, kp, imgShape):
@@ -146,12 +152,6 @@ class AgentLocate:
         quads_y = np.where(quads_y < 0, -1, quads_y)
         quads_y = np.where(quads_y > 0, 1, quads_y)
 
-        print("QUADS X")
-        print(quads_x)
-
-        print("QUADS_Y")
-        print(quads_y)
-
         # Transformation logic:
         # Move in the forward direction iff all conditions are met:
         #   - Majority of Y quadrants in the top most row are 0 or negative
@@ -176,31 +176,28 @@ class AgentLocate:
 
         if (np.sum(quads_y[0]) == 0 and np.sum(quads_y[3]) == 0 and
             np.sum(quads_x[:,0]) == 0 and np.sum(quads_x[:,3]) == 0):
-            # if self.debugging:
-            #     print('Staying')
             mov[0] = 's'
         elif (np.sum(quads_y[0]) <= 0 and np.sum(quads_y[3]) >= 0 and
             np.sum(quads_x[:,0]) <= 0 and np.sum(quads_x[:,3]) >= 0):
-            # if self.debugging:
-            #     print('Moving Forward')
             mov[0] = 'f'
-        
+
+        # NOTE: Trial and error for determining best rotation estimation
         # x_sum = stats.mode([quads_x[0,0], quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[0,1], quads_x[0,2], quads_x[0,3], quads_x[1,3], quads_x[2,3], quads_x[3,3]])[0][0]
         # x_sum = np.median([quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[1,3], quads_x[2,3], quads_x[3,3]])
         # x_sum = np.median(quads_x)
         # x_sum = np.average(quads_x)
-        x_sum = np.sum(quads_x)
         # x_sum = scipy.stats.mode(quads_x, axis=None)[0][0]
         # x_sum = scipy.stats.mode(np.array([quads_x[0,0], quads_x[1,0], quads_x[2,0], quads_x[3,0], quads_x[0,1], quads_x[0,2], quads_x[0,3], quads_x[1,3], quads_x[2,3], quads_x[3,3]]), axis=None)[0][0]
-        print('xsum is:', x_sum)
+        x_sum = np.sum(quads_x)
+        if self.debugging:
+            print('xsum is:', x_sum)
+
         if (x_sum < -2):
-            # if self.debugging:
-            #     print('Rotate Right', x_sum)
             mov[1] = 'r'
         elif (x_sum > 2):
-            # if self.debugging:
-            #     print('Rotate Left', x_sum)
             mov[1] = 'l'
+
+        # NOTE: Up and down rotations still in progress to be implemented correctly and tested
         # elif (np.sum(quads_y) < 0):
         #     if self.debugging:
         #         print('Rotate Down')
@@ -211,10 +208,7 @@ class AgentLocate:
         #     mov[1] = 'u'
         else:
             pass
-            # if self.debugging:
-                # print('No Rotate', x_sum)
 
-        # No movement
         return self.smoothMove(mov)
 
     # Compute the change in agent location based on previous frame

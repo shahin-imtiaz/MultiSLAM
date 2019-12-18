@@ -1,3 +1,8 @@
+# Based on the UCBDrive's HD3 libraries
+# https://github.com/ucbdrive/hd3
+#
+# Currently work is still in progress to make this module functional as there are a few library errors
+
 from __future__ import absolute_import, division, print_function
 
 import sys
@@ -65,64 +70,33 @@ class StereoDepthCNN:
     def estimate(self, imgL, imgR):
         input_size = imgL.shape
 
-        # imgL = Image.fromarray(imgL).convert('RGB')
-        # imgR = Image.fromarray(imgR).convert('RGB')
-        # imgL = Image.fromarray(imgL)
-        # imgR = Image.fromarray(imgR)
-        # print(imgR.size)
-
         mean = [0.485, 0.456, 0.406]
         std = [0.229, 0.224, 0.225]
         
         th, tw = self.get_target_size(input_size[0], input_size[1])
-        # print(th, tw)
         
         val_transform = transforms.Compose(
             [transforms.ToTensor(),
             transforms.Normalize(mean=mean, std=std)])
-        
-        # val_data = datasets.HD3Data(
+    
         mode="stereo"
-        # data_root=args.data_root,
-        # data_list=args.data_list,
         label_num=False
         transform=val_transform
         out_size=True
-            # )
-        
-        # val_loader = torch.utils.data.DataLoader(
-        #     val_data,
-        #     batch_size=1,
-        #     shuffle=False,
-        #     num_workers=16,
-        #     pin_memory=True)
 
         cudnn.enabled = True
         cudnn.benchmark = True
-        
-        # imgL = val_transform(imgL, [])
-        # imgR = val_transform(imgR, [])
-        # print(imgL.shape)
+
         cur_data = [[imgL, imgR], []]
         cur_data = list(val_transform(*cur_data))
         cur_data.append(np.array(input_size[::-1], dtype=int))
         cur_data = tuple(cur_data)
 
-        # print(cur_data)
-        # imgL_tensor = cur_data[0][0]
-        # print(imgL)
-        # imgR_tensor = cur_data[0][1]
-
         with torch.no_grad():
-            # for i, (img_list, label_list, img_size) in enumerate(val_loader):
-                # data_time.update(time.time() - end)
-
             img_list, label_list, img_size = cur_data
-            # print(img_list)
             img_list = [img.unsqueeze(0) for img in img_list]
             img_size = np.array(input_size[:2][::-1], dtype=int)
             img_size = img_size[np.newaxis, :]
-            # print(img_size)
             img_list = [img.to(torch.device("cuda")) for img in img_list]
             label_list = [
                 label.to(torch.device("cuda")) for label in label_list
@@ -135,22 +109,6 @@ class StereoDepthCNN:
                 for img in img_list
             ]
 
-
-
-            # # img_size = np.array(imgL.size, dtype=int).cpu().numpy()
-            # img_size = np.array(imgL.size, dtype=int)
-            # img_list = [imgL_tensor.to(torch.device("cuda")), imgR_tensor.to(torch.device("cuda"))]
-            # label_list = []
-            # print(img_list[0].shape)
-
-            # # resize test
-            # resized_img_list = [
-            #     F.interpolate(
-            #         img, (th, tw), mode='bilinear', align_corners=True)
-            #     for img in img_list
-            # ]
-
-
             output = self.model(
                 img_list=resized_img_list,
                 label_list=label_list,
@@ -161,21 +119,10 @@ class StereoDepthCNN:
                                                 img_size[0, 1],
                                                 img_size[0, 0])
 
-
             pred_vect = output['vect'].data.cpu().numpy()
             pred_vect = np.transpose(pred_vect, (0, 2, 3, 1))
-            # curr_bs = pred_vect.shape[0]
-            # assert curr_bs == 1
-
-            # for idx in range(curr_bs):
-                # curr_idx = i * 1 + idx
             curr_vect = pred_vect[0]
 
             vis_flo = fl.flow_to_image(fl.disp2flow(curr_vect))
             vis_flo = cv2.cvtColor(vis_flo, cv2.COLOR_RGB2BGR)
             return vis_flo
-
-                    # cv2.imwrite(vis_fn, vis_flo)
-
-                    # cv2.imwrite(vect_fn,
-                    #             np.uint16(-curr_vect[:, :, 0] * 256.0))

@@ -1,3 +1,8 @@
+# Based on the Open3D libraries
+# https://github.com/intel-isl/Open3D
+#
+# Customized with our own 3D position estimation of agent in point cloud
+
 import open3d as o3d
 import cv2
 import matplotlib.pyplot as plt
@@ -18,18 +23,13 @@ class GeoProjection():
         self.xyz = np.zeros(3, dtype='float64')
         self.rot = np.zeros((3,1), dtype='float64')
         self.vis = None
-        # self.fwd = 0.00005
 
         # If using live mode, create the visualizer window.
         if self.mode == 'online':
             self.vis = o3d.visualization.Visualizer()
-            # self.vis = o3d.visualization.VisualizerWithKeyCallback()
             self.vis.create_window()
-            
-            # Fix from https://github.com/intel-isl/Open3D/issues/497
-            # self.vis.register_key_callback(ord("C"), self.center_view)
     
-    # Fix from https://github.com/intel-isl/Open3D/issues/497
+    # Fix view reset from https://github.com/intel-isl/Open3D/issues/497
     def center_view(self, vis):
         vis.reset_view_point(True)
         ctr = vis.get_view_control()
@@ -43,7 +43,6 @@ class GeoProjection():
         ctr = self.vis.get_view_control()
         ctr.rotate(0, 500)
         self.vis.update_renderer()
-        # time.sleep(5)
 
     # DEPRECATED
     # Returns the rotation matrix for a rotation in the Y axis
@@ -76,17 +75,21 @@ class GeoProjection():
             #   |       <------         |           ------->
             #   | 0d            90d     v 180d               270d
             self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
+        
         # Rotate right (Y axis)
         if transformID[1] == 'r':
             self.rot += np.array([0,0.032,0]).reshape(3,1)
             self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
+        
         # Rotate left (Y axis)
         elif transformID[1] == 'l':
             self.rot += np.array([0,-0.032,0]).reshape(3,1)
             self.xyz += np.array([np.sin(self.rot[1][0])*magnitude, 0, -np.cos(self.rot[1][0])*magnitude])
+        
         # Rotate up (X axis)
         elif transformID[1] == 'u':
             self.rot += np.array([-0.032,0,0]).reshape(3,1)
+        
         # Rotate down (X axis)
         elif transformID[1] == 'd':
             self.rot += np.array([0.032,0,0]).reshape(3,1)
@@ -149,10 +152,6 @@ class GeoProjection():
             self.pcd = copy.deepcopy(cur_pcd)
             if self.mode == 'online':
                 self.vis.add_geometry(self.pcd)
-                # ctr = self.vis.get_view_control()
-                # ctr.change_field_of_view(step=90.0)
-                # self.vis.run()
-                # self.vis.destroy_window()
         else:
             self.pcd += cur_pcd
 
